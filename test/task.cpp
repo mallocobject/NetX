@@ -28,26 +28,28 @@ Task<int> hello()
 Task<> sleep1()
 {
 	co_await sleep(2s);
+	LOG_INFO << "sleep1苏醒";
 }
 
 Task<> sleep2()
 {
 	co_await sleep(5s);
+	LOG_INFO << "sleep2苏醒";
 }
 
 Task<> sleep_()
 {
-	co_await sleep1();
-	LOG_INFO << "sleep1苏醒";
-	co_await sleep2();
-	LOG_INFO << "sleep2苏醒";
+	auto t2 = co_spawn(sleep2()); // 5s
+	auto t1 = co_spawn(sleep1()); // 2s
+
+	co_await t2;
+	co_await t1;
 }
 
 int main()
 {
 	auto start = std::chrono::steady_clock::now();
-	auto t = co_spawn(sleep_());
-	async_main(hello());
+	async_main(sleep_());
 
 	LOG_INFO << std::chrono::duration_cast<std::chrono::seconds>(
 					std::chrono::steady_clock::now() - start)

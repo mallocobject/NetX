@@ -81,7 +81,7 @@ struct EventLoop
 
 		void destroy() noexcept
 		{
-			poller.registerEvent(event);
+			poller.unregisterEvent(event);
 		}
 
 		~EventAwaiter()
@@ -169,14 +169,13 @@ inline void EventLoop::runOnce()
 	auto now = Clock::now();
 	while (!schedule_.empty())
 	{
-		auto pair = schedule_.extract(schedule_.begin());
-		TimePoint when = pair.value().first;
-		HandleInfo info = std::move(pair.value().second);
+		auto& [when, info] = *schedule_.begin();
 		if (when > now)
 		{
 			break;
 		}
 		ready_.push(std::move(info));
+		schedule_.erase(schedule_.begin());
 	}
 
 	while (!ready_.empty())

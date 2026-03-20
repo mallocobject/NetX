@@ -176,9 +176,9 @@ template <typename T = void> struct Task
 
 			template <typename P>
 			void await_suspend(
-				std::coroutine_handle<P> caller_handle) const noexcept
+				std::coroutine_handle<P> self_coro) const noexcept
 			{
-				if (auto cont = caller_handle.promise().continuation)
+				if (auto cont = self_coro.promise().continuation)
 				{
 					EventLoop::loop().call_soon(*cont);
 				}

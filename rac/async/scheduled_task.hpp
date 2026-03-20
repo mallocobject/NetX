@@ -5,7 +5,7 @@
 #include <utility>
 namespace rac
 {
-template <Future Task> struct ScheduledTask
+template <Future TaskT> struct ScheduledTask
 {
 	template <Future Fut>
 	explicit ScheduledTask(Fut&& fut) noexcept : task_(std::forward<Fut>(fut))
@@ -56,13 +56,13 @@ template <Future Task> struct ScheduledTask
 		return task_.done();
 	}
 
-	void cancel() const
+	void cancel()
 	{
 		task_.destroy();
 	}
 
   private:
-	Task task_;
+	TaskT task_;
 };
 
 template <Future Fut> ScheduledTask(Fut&&) -> ScheduledTask<Fut>;
@@ -70,7 +70,7 @@ template <Future Fut> ScheduledTask(Fut&&) -> ScheduledTask<Fut>;
 template <Future Fut>
 [[nodiscard(
 	"discard(detached) a task will not schedule to run")]] ScheduledTask<Fut>
-co_spawn(Fut&& fut)
+co_spawn(Fut&& fut) // 内部无 await，需要 co_await 延长生命周期
 {
 	return ScheduledTask{std::forward<Fut>(fut)};
 }

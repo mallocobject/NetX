@@ -52,11 +52,6 @@ struct EpollPoller
 		int nevs = checkErrorNonBlock(
 			epoll_wait(epfd_, evs.data(), registered_event_count_, timeout),
 			EINTR);
-		if (nevs == 0)
-		{
-			LOG_WARN << "epoll_wait out time";
-			return {};
-		}
 
 		std::vector<Event> result;
 		for (int i = 0; i < nevs; i++)
