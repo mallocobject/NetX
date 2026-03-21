@@ -42,16 +42,16 @@ struct EpollPoller
 
 	void unregisterEvent(const Event& event)
 	{
-		checkError(epoll_ctl(epfd_, EPOLL_CTL_DEL, event.fd, nullptr));
+		checkErrorNonBlock<EBADF, ENOENT>(
+			epoll_ctl(epfd_, EPOLL_CTL_DEL, event.fd, nullptr));
 		registered_event_count_--;
 	}
 
 	std::vector<Event> poll(int timeout)
 	{
 		std::vector<epoll_event> evs(registered_event_count_);
-		int nevs = checkErrorNonBlock(
-			epoll_wait(epfd_, evs.data(), registered_event_count_, timeout),
-			EINTR);
+		int nevs = checkErrorNonBlock<EINTR>(
+			epoll_wait(epfd_, evs.data(), registered_event_count_, timeout));
 
 		std::vector<Event> result;
 		for (int i = 0; i < nevs; i++)

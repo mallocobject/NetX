@@ -3,6 +3,8 @@
 #include "rac/async/async_main.hpp"
 #include "rac/async/sleep.hpp"
 #include "rac/async/task.hpp"
+#include <coroutine>
+#include <thread>
 
 using namespace rac;
 using namespace std::chrono_literals;
@@ -26,7 +28,21 @@ Task<> task3()
 	LOG_INFO << "hello world";
 }
 
+Task<> forever()
+{
+	co_await when_any(std::suspend_always{}, sleep(1s));
+}
+
+Task<> rightnow()
+{
+	co_await when_any(std::suspend_never{}, sleep(1s));
+}
+
 int main()
 {
-	async_main(task3());
+	auto start = std::chrono::steady_clock::now();
+	async_main(rightnow());
+	LOG_INFO << std::chrono::duration_cast<std::chrono::seconds>(
+					std::chrono::steady_clock::now() - start)
+					.count();
 }

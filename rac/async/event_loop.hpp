@@ -61,28 +61,32 @@ struct EventLoop
 			return false;
 		}
 
-		template <Promise P>
-			requires requires(P p) {
-				p.setState();
-				p.handleId();
-			}
+		template <typename P>
 		void await_suspend(std::coroutine_handle<P> handle) noexcept
 		{
 			handle.promise().setState(Handle::State::kSuspend);
 			event.handle_info = {handle.promise().handleId(),
 								 &handle.promise()};
 
-			poller.registerEvent(event);
+			if (!registered)
+			{
+				poller.registerEvent(event);
+				registered = true;
+			}
 		}
 
 		void await_resume() noexcept
 		{
-			event = {};
+			event.handle_info = {};
 		}
 
 		void destroy() noexcept
 		{
-			poller.unregisterEvent(event);
+			if (registered)
+			{
+				poller.unregisterEvent(event);
+				registered = false;
+			}
 		}
 
 		~EventAwaiter()
@@ -92,6 +96,7 @@ struct EventLoop
 
 		EpollPoller& poller;
 		Event event{};
+		bool registered{false};
 	};
 
 	[[nodiscard]] auto wait_event(const Event& event)
