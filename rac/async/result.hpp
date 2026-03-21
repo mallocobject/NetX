@@ -12,12 +12,17 @@ template <typename T = void> struct Result
 	template <typename... Args> void return_value(Args... args)
 	{
 		new (std::addressof(val)) T(std::forward<Args>(args)...);
-		has_value = true;
+		has_value_ = true;
 	}
 
 	void unhandled_exception() noexcept
 	{
 		exception = std::current_exception();
+	}
+
+	bool has_value() const noexcept
+	{
+		return has_value_;
 	}
 
 	T result() &
@@ -37,7 +42,7 @@ template <typename T = void> struct Result
 		}
 		T ret = std::move(val);
 		val.~T();
-		has_value = false;
+		has_value_ = false;
 		return ret;
 	}
 
@@ -49,7 +54,7 @@ template <typename T = void> struct Result
 
 	~Result()
 	{
-		if (has_value)
+		if (has_value_)
 		{
 			val.~T();
 		}
@@ -60,18 +65,23 @@ template <typename T = void> struct Result
 		T val;
 	};
 	std::exception_ptr exception;
-	bool has_value{false};
+	bool has_value_{false};
 };
 
 template <> struct Result<void>
 {
-	void return_void() noexcept
+	void return_void() const noexcept
 	{
 	}
 
 	void unhandled_exception() noexcept
 	{
 		exception = std::current_exception();
+	}
+
+	bool has_value() const noexcept
+	{
+		return false;
 	}
 
 	auto result() noexcept

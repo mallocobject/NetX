@@ -18,13 +18,13 @@ struct NoWaitAtInitialSuspend
 {
 };
 inline constexpr NoWaitAtInitialSuspend no_wait_at_initial_suspend;
-
 template <typename T = void> struct Task
 {
 	struct promise_type;
 	using coro_handle = std::coroutine_handle<promise_type>;
 
 	template <Future> friend struct ScheduledTask;
+	friend struct WhenAnyAwaiter;
 
 	explicit Task(coro_handle coro) noexcept : coro_(coro)
 	{

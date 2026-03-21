@@ -4,7 +4,7 @@ project(test)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(test task.cpp)
+add_executable(test when_any.cpp)
 
 target_link_libraries(test PRIVATE rac elog)
 
