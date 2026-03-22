@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
+#include <string>
 #include <sys/types.h>
 #include <unistd.h>
 #include <utility>
@@ -95,7 +96,7 @@ class Stream
 		}
 	}
 
-	Task<> write(const std::string& str)
+	Task<> write(const std::string& str = std::string())
 	{
 		write_buf_.append(str);
 		while (write_buf_.readableBytes() > 0)
@@ -122,6 +123,11 @@ class Stream
 	const InetAddr& sock_addr() const
 	{
 		return sock_addr_;
+	}
+
+	Buffer* write_buffer()
+	{
+		return &write_buf_;
 	}
 
   private:

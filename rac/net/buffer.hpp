@@ -1,10 +1,12 @@
 #ifndef RAC_NET_BUFFER_HPP
 #define RAC_NET_BUFFER_HPP
 
+#include "rac/net/buffer_endian_helper.hpp"
+#include "rac/net/rpc_header.hpp"
+#include "rpc_header.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <endian.h>
 #include <netinet/in.h>
@@ -19,8 +21,11 @@ class Buffer
 {
 	inline static constexpr std::size_t kMaxBufferSize = 16 * 1024;
 	inline static constexpr std::size_t kInitBufferSize = 1024;
-	inline static constexpr std::size_t kPrependSize = 8;
+	inline static constexpr std::size_t kPrependSize = 64; // enough
 	inline static constexpr char kCRLF[] = "\r\n";
+
+	static_assert(sizeof(RpcHeaderWire) <= kPrependSize,
+				  "insufficient preallocated space");
 
   public:
 	Buffer() = default;
@@ -128,31 +133,63 @@ class Buffer
 		}
 	}
 
-	void appendInt32(std::int32_t x)
+	template <typename T> void appendInt(T x)
 	{
-		std::int32_t be32 = htonl(x);
-		append(reinterpret_cast<const char*>(&be32), sizeof(be32));
+		static_assert(std::is_integral_v<T>,
+					  "appendInt<T>: T must be integral");
+		T be = hostToBE(x);
+		append(reinterpret_cast<const char*>(&be), sizeof(be));
 	}
 
-	void prependInt32(std::int32_t x)
+	template <typename T> void prependInt(T x)
 	{
-		std::int32_t be32 = ::htonl(x);
-		prepend(&be32, sizeof(be32));
+		static_assert(std::is_integral_v<T>,
+					  "prependInt<T>: T must be integral");
+		T be = hostToBE(x);
+		prepend(&be, sizeof(be));
 	}
 
-	std::int32_t peekInt32() const
+	template <typename T> T peekInt() const
 	{
-		assert(readableBytes() >= sizeof(int32_t));
-		std::int32_t be32 = 0;
-		memcpy(&be32, peek(), sizeof(be32));
-		return ntohl(be32);
+		static_assert(std::is_integral_v<T>, "peekInt<T>: T must be integral");
+		assert(readableBytes() >= sizeof(T));
+		T be{};
+		memcpy(&be, peek(), sizeof(be));
+		return beToHost(be);
 	}
 
-	std::int32_t retrieveInt32()
+	template <typename T> T retrieveInt()
 	{
-		int32_t result = peekInt32();
-		retrieve(sizeof(std::int32_t));
-		return result;
+		T v = peekInt<T>();
+		retrieve(sizeof(T));
+		return v;
+	}
+
+	void appendRpcHeader(const RpcHeader& h)
+	{
+		RpcHeaderWire be_h = to_wire(h);
+		append(reinterpret_cast<const char*>(&be_h), sizeof(RpcHeaderWire));
+	}
+
+	void prependRpcHeader(const RpcHeader& h)
+	{
+		RpcHeaderWire be_h = to_wire(h);
+		prepend(&be_h, sizeof(RpcHeaderWire));
+	}
+
+	RpcHeader peekRpcHeader() const
+	{
+		assert(readableBytes() >= sizeof(RpcHeaderWire));
+		RpcHeaderWire h{};
+		memcpy(&h, peek(), sizeof(RpcHeaderWire));
+		return to_host(h);
+	}
+
+	RpcHeader retrieveRpcHeader()
+	{
+		RpcHeader v = peekRpcHeader();
+		retrieve(sizeof(RpcHeaderWire));
+		return v;
 	}
 
 	std::string retrieve_string(std::size_t len)
