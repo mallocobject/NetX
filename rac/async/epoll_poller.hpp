@@ -1,7 +1,6 @@
 #ifndef RAC_ASYNC_EPOLL_POLLER_HPP
 #define RAC_ASYNC_EPOLL_POLLER_HPP
 
-#include "elog/logger.h"
 #include "rac/async/check_error.hpp"
 #include "rac/async/event.hpp"
 #include <cassert>
@@ -34,10 +33,18 @@ struct EpollPoller
 	void registerEvent(const Event& event)
 	{
 		epoll_event ev{
-			.events = event.flags,
+			.events = event.flags | EPOLLONESHOT,
 			.data{.ptr = const_cast<HandleInfo*>(&event.handle_info)}};
 		checkError(epoll_ctl(epfd_, EPOLL_CTL_ADD, event.fd, &ev));
 		registered_event_count_++;
+	}
+
+	void modifyEvent(const Event& event)
+	{
+		epoll_event ev{
+			.events = event.flags | EPOLLONESHOT,
+			.data{.ptr = const_cast<HandleInfo*>(&event.handle_info)}};
+		checkError(epoll_ctl(epfd_, EPOLL_CTL_MOD, event.fd, &ev));
 	}
 
 	void unregisterEvent(const Event& event)

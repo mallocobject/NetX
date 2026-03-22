@@ -1,8 +1,6 @@
 #ifndef RAC_ASYNC_EVENT_LOOP_HPP
 #define RAC_ASYNC_EVENT_LOOP_HPP
 
-#include "elog/logger.h"
-#include "rac/async/concepts.hpp"
 #include "rac/async/epoll_poller.hpp"
 #include "rac/async/event.hpp"
 #include "rac/async/handle.hpp"
@@ -73,6 +71,10 @@ struct EventLoop
 				poller.registerEvent(event);
 				registered = true;
 			}
+			else
+			{
+				poller.modifyEvent(event);
+			}
 		}
 
 		void await_resume() noexcept
@@ -80,7 +82,7 @@ struct EventLoop
 			event.handle_info = {};
 		}
 
-		void destroy() noexcept
+		void reset() noexcept
 		{
 			if (registered)
 			{
@@ -89,9 +91,20 @@ struct EventLoop
 			}
 		}
 
+		EventAwaiter(EpollPoller& poller, Event event)
+			: poller(poller), event(std::move(event))
+		{
+		}
+
+		EventAwaiter(EventAwaiter&& other) noexcept
+			: poller(other.poller), event(std::exchange(other.event, {})),
+			  registered(std::exchange(other.registered, false))
+		{
+		}
+
 		~EventAwaiter()
 		{
-			destroy();
+			reset();
 		}
 
 		EpollPoller& poller;

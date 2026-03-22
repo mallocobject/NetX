@@ -1,7 +1,6 @@
 #ifndef RAC_ASYNC_RESULT_HPP
 #define RAC_ASYNC_RESULT_HPP
 
-#include "elog/logger.h"
 #include "rac/async/non_void_helper.hpp"
 #include <exception>
 #include <memory>

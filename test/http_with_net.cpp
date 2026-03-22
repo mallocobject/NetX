@@ -5,6 +5,7 @@
 #include "rac/async/event_loop.hpp"
 #include "rac/async/scheduled_task.hpp"
 #include "rac/async/task.hpp"
+#include "rac/net/stream.hpp"
 #include <arpa/inet.h>
 #include <cassert>
 #include <chrono>
@@ -27,59 +28,33 @@ using namespace rac;
 
 Task<> handle_client(int fd)
 {
-	char buf[1024];
-
-	Event rd_ev{.fd = fd, .flags = EPOLLIN};
-	Event wr_ev{.fd = fd, .flags = EPOLLOUT | EPOLLONESHOT};
-	auto rd_awaiter = EventLoop::loop().wait_event(rd_ev);
-	auto wr_awaiter = EventLoop::loop().wait_event(wr_ev);
+	Stream s(fd);
 	const char* response = "HTTP/1.1 200 OK\r\n"
 						   "Content-Type: text/plain\r\n"
 						   "Content-Length: 12\r\n"
 						   "Connection: keep-alive\r\n\r\n"
 						   "Hello, world";
-	std::size_t total = strlen(response);
+
+	// auto rd_buf = co_await s.read();
+	// if (!rd_buf)
+	// {
+	// 	co_return;
+	// }
+	// rd_buf->retrieve(rd_buf->readableBytes());
+	// co_await s.write(response);
+
+	// co_return;
 
 	while (true)
 	{
-		while (true)
+		auto rd_buf = co_await s.read();
+		if (!rd_buf)
 		{
-			ssize_t n = read(fd, buf, sizeof(buf));
-			if (n > 0)
-			{
-				break;
-			}
-			else if (n == -1 && (errno == EWOULDBLOCK || errno == EAGAIN))
-			{
-				co_await rd_awaiter;
-			}
-			else
-			{
-				close(fd);
-				co_return;
-			}
+			co_return;
 		}
 
-		std::size_t written = 0;
-		while (written < total)
-		{
-			ssize_t w = write(fd, response + written, total - written);
-			if (w > 0)
-			{
-				written += w;
-			}
-			else if (w == -1 && (errno == EWOULDBLOCK || errno == EAGAIN))
-			{
-				co_await wr_awaiter;
-			}
-			else
-			{
-				close(fd);
-				co_return;
-			}
-		}
-		// close(fd);
-		// co_return;
+		rd_buf->retrieve(rd_buf->readableBytes());
+		co_await s.write(response);
 	}
 }
 

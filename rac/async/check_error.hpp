@@ -22,14 +22,14 @@ auto checkError(
 	return res;
 }
 
-template <int First = EWOULDBLOCK, int... BlockErrs>
+template <int... BlockErrs>
 auto checkErrorNonBlock(
 	auto res, std::source_location const& loc = std::source_location::current())
 {
 	if (res == -1)
 	{
-		const bool acceptable =
-			(errno == First) || ((errno == BlockErrs) || ...);
+		const bool acceptable = (errno == EWOULDBLOCK) || (errno == EAGAIN) ||
+								((errno == BlockErrs) || ...);
 		if (!acceptable) [[unlikely]]
 		{
 			throw std::system_error(errno, std::system_category(),
@@ -51,13 +51,12 @@ auto checkError(auto res)
 	return res;
 }
 
-template <int First = EWOULDBLOCK, int... BlockErrs>
-auto checkErrorNonBlock(auto res)
+template <int... BlockErrs> auto checkErrorNonBlock(auto res)
 {
 	if (res == -1)
 	{
-		const bool acceptable =
-			(errno == First) || ((errno == BlockErrs) || ...);
+		const bool acceptable = (errno == EWOULDBLOCK) || (errno == EAGAIN) ||
+								((errno == BlockErrs) || ...);
 		if (!acceptable) [[unlikely]]
 		{
 			throw std::system_error(errno, std::system_category());

@@ -1,7 +1,6 @@
 #ifndef RAC_ASYNC_SCHEDULED_TASK_HPP
 #define RAC_ASYNC_SCHEDULED_TASK_HPP
 
-#include "elog/logger.h"
 #include "rac/async/concepts.hpp"
 #include <utility>
 namespace rac

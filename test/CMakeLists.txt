@@ -4,7 +4,7 @@ project(test)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(test http.cpp)
+add_executable(test http_with_net.cpp)
 
 target_link_libraries(test PRIVATE rac elog)
 

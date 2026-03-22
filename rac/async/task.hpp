@@ -1,7 +1,6 @@
 #ifndef RAC_ASYNC_TASK_HPP
 #define RAC_ASYNC_TASK_HPP
 
-#include "elog/logger.h"
 #include "rac/async/concepts.hpp"
 #include "rac/async/coro_handle.hpp"
 #include "rac/async/event_loop.hpp"
@@ -10,6 +9,7 @@
 #include <cassert>
 #include <coroutine>
 #include <format>
+#include <iostream>
 #include <stdexcept>
 #include <utility>
 namespace rac
