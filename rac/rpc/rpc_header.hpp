@@ -1,7 +1,7 @@
-#ifndef RAC_NET_RPC_HEADER_HPP
-#define RAC_NET_RPC_HEADER_HPP
+#ifndef RAC_RPC_RPC_HEADER_HPP
+#define RAC_RPC_RPC_HEADER_HPP
 
-#include "rac/net/buffer_endian_helper.hpp"
+#include "rac/meta/buffer_endian_helper.hpp"
 #include <cstdint>
 #include <netinet/in.h>
 #include <ostream>
@@ -15,29 +15,30 @@ static constexpr std::uint8_t kVersion = 1;
 // net
 struct RpcHeaderWire
 {
-	uint32_t magic;
-	uint8_t version;
-	uint8_t flags;
-	uint16_t header_len;
-	uint32_t body_len;
-	uint64_t request_id;
-	uint32_t reserved;
+	std::uint32_t magic;
+	std::uint8_t version;
+	std::uint8_t flags;
+	std::uint16_t header_len;
+	std::uint32_t body_len; // Payload length
+	std::uint64_t request_id;
+	std::uint32_t reserved;
 };
 #pragma pack(pop)
 
 // host
 struct RpcHeader
 {
-	uint32_t magic{};
-	uint8_t version{};
-	uint8_t flags{};
-	uint16_t header_len{};
-	uint32_t body_len{};
-	uint64_t request_id{};
-	uint32_t reserved{};
+	std::uint32_t magic{};
+	std::uint8_t version{};
+	std::uint8_t flags{};
+	std::uint16_t header_len{};
+	std::uint32_t body_len{};
+	std::uint64_t request_id{};
+	std::uint32_t reserved{};
 };
 
-static_assert(sizeof(RpcHeaderWire) == 24);
+static constexpr std::uint16_t kRpcHeaderWireLength = sizeof(RpcHeaderWire);
+static constexpr std::uint16_t kRpcHeaderLength = sizeof(RpcHeader);
 
 inline RpcHeader to_host(const RpcHeaderWire& w)
 {

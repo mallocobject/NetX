@@ -1,9 +1,8 @@
 #ifndef RAC_NET_BUFFER_HPP
 #define RAC_NET_BUFFER_HPP
 
-#include "rac/net/buffer_endian_helper.hpp"
-#include "rac/net/rpc_header.hpp"
-#include "rpc_header.hpp"
+#include "rac/meta/buffer_endian_helper.hpp"
+#include "rac/rpc/rpc_header.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -21,7 +20,7 @@ class Buffer
 {
 	inline static constexpr std::size_t kMaxBufferSize = 16 * 1024;
 	inline static constexpr std::size_t kInitBufferSize = 1024;
-	inline static constexpr std::size_t kPrependSize = 64; // enough
+	inline static constexpr std::size_t kPrependSize = 32; // enough
 	inline static constexpr char kCRLF[] = "\r\n";
 
 	static_assert(sizeof(RpcHeaderWire) <= kPrependSize,

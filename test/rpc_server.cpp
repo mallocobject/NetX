@@ -1,13 +1,36 @@
 #include "rac/async/async_main.hpp"
 #include "rac/async/scheduled_task.hpp"
 #include "rac/async/task.hpp"
-#include "rac/net/rpc_header.hpp"
+#include "rac/meta/reflection.hpp"
 #include "rac/net/socket.hpp"
 #include "rac/net/stream.hpp"
+#include "rac/rpc/rpc_header.hpp"
+#include "rac/rpc/serialize_traits.hpp"
 #include <csignal>
+#include <cstddef>
 #include <list>
+#include <string>
+#include <tuple>
 
 using namespace rac;
+
+struct Point
+{
+	double x;
+	double y;
+};
+
+struct User
+{
+	std::uint32_t id;
+	std::string name;
+	Point loc;
+};
+
+User rpc_func(const User& usr)
+{
+	return usr;
+}
 
 Task<> handle_client(int fd)
 {
@@ -15,18 +38,47 @@ Task<> handle_client(int fd)
 
 	while (true)
 	{
-		auto rd_buf = co_await s.read();
-		if (!rd_buf)
+		while (s.read_buffer()->readableBytes() < sizeof(RpcHeaderWire))
 		{
-			co_return;
+			auto rd_buf = co_await s.read();
+			if (!rd_buf)
+			{
+				co_return;
+			}
 		}
 
-		if (rd_buf->readableBytes() < sizeof(rac::RpcHeaderWire))
+		RpcHeader h = s.read_buffer()->peekRpcHeader();
+		std::size_t total_len = h.header_len + h.body_len;
+
+		while (s.read_buffer()->readableBytes() < total_len)
 		{
-			continue;
+			auto rd_buf = co_await s.read();
+			if (!rd_buf)
+			{
+				co_return;
+			}
 		}
-		RpcHeader h = rd_buf->retrieveRpcHeader();
+
+		s.read_buffer()->retrieve(h.header_len);
+
 		std::cout << h << std::endl;
+
+		using ArgsType = std::tuple<User>;
+		ArgsType args;
+
+		DeserializeTraits<ArgsType>::deserialize(s.read_buffer(), &args);
+
+		User result = std::apply(rpc_func, args);
+
+		using RetType = std::tuple<User>;
+		RetType ret{result};
+		Buffer payload;
+		SerializeTraits<RetType>::serialize(&payload, ret);
+
+		h.body_len = static_cast<uint32_t>(payload.readableBytes());
+		s.write_buffer()->appendRpcHeader(h);
+		s.write_buffer()->append(payload.peek(), payload.readableBytes());
+		co_await s.write();
 	}
 }
 

@@ -68,7 +68,7 @@ class Stream
 		read_fd_ = write_fd_ = -1;
 	}
 
-	Task<Buffer*> read()
+	Task<bool> read()
 	{
 		while (true)
 		{
@@ -77,11 +77,11 @@ class Stream
 
 			if (n > 0)
 			{
-				co_return &read_buf_;
+				co_return true;
 			}
 			else if (n == 0)
 			{
-				co_return nullptr;
+				co_return false;
 			}
 			else
 			{
@@ -89,7 +89,7 @@ class Stream
 				int err = checkErrorNonBlock<ECONNRESET>(n);
 				if (err == ECONNRESET)
 				{
-					co_return nullptr; // 连接已死
+					co_return false; // 连接已死
 				}
 				co_await read_awaiter_;
 			}
@@ -123,6 +123,11 @@ class Stream
 	const InetAddr& sock_addr() const
 	{
 		return sock_addr_;
+	}
+
+	Buffer* read_buffer()
+	{
+		return &read_buf_;
 	}
 
 	Buffer* write_buffer()
