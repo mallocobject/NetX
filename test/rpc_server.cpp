@@ -78,13 +78,13 @@ Task<> handle_client(int fd)
 
 		LOG_DEBUG << "Client requesting method: " << method_name;
 
-		Buffer res_payload;
-		dispatcher.dispatch(method_name, s.read_buffer(), &res_payload);
+		std::size_t size_before = s.write_buffer()->readableBytes();
+		dispatcher.dispatch(method_name, s.read_buffer(), s.write_buffer());
 
-		h.body_len = static_cast<uint32_t>(res_payload.readableBytes());
-		s.write_buffer()->appendRpcHeader(h);
-		s.write_buffer()->append(res_payload.peek(),
-								 res_payload.readableBytes());
+		h.body_len = static_cast<uint32_t>(s.write_buffer()->readableBytes() -
+										   size_before);
+		s.write_buffer()->prependRpcHeader(h);
+
 		co_await s.write();
 	}
 }

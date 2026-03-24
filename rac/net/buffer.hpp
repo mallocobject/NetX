@@ -18,6 +18,10 @@ namespace rac
 {
 class Buffer
 {
+	template <typename Tuple, std::size_t... Is>
+	friend void serialize_tuple_tlv_impl(Buffer* buf, const Tuple& t,
+										 std::index_sequence<Is...>);
+
 	inline static constexpr std::size_t kMaxBufferSize = 16 * 1024;
 	inline static constexpr std::size_t kInitBufferSize = 1024;
 	inline static constexpr std::size_t kPrependSize = 32; // enough
@@ -202,6 +206,15 @@ class Buffer
 	const char* find_CRLF(const char* start = nullptr) const;
 
 	ssize_t read_fd(int fd, int* saved_errno);
+
+	// void move(std::uint32_t len)
+	// {
+	// 	std::size_t n = sizeof(len);
+	// 	ensureWritableBytes(n);
+	// 	std::copy(data_.data() + wptr_ - len, data_.data() + wptr_,
+	// 			  data_.data() + rptr_ - len + n);
+	// 	wptr_ += n;
+	// }
 
   private:
 	void retrieveAll() noexcept

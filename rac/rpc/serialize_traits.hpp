@@ -5,6 +5,7 @@
 #include "rac/meta/reflection.hpp"
 #include "rac/net/buffer.hpp"
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <tuple>
 #include <type_traits>
@@ -190,15 +191,28 @@ void serialize_tuple_tlv_impl(Buffer* buf, const Tuple& t,
 				 if constexpr (is_custom_struct_v<FieldType> ||
 							   is_tuple_type_v<FieldType>)
 				 {
-					 Buffer tmp{};
-					 SerializeTraits<FieldType>::serialize(&tmp,
+					 std::size_t size_before = buf->readableBytes();
+					 SerializeTraits<FieldType>::serialize(buf,
 														   std::get<Is>(t));
-
-					 std::uint32_t len =
-						 static_cast<std::uint32_t>(tmp.readableBytes());
+					 std::uint32_t len = static_cast<std::uint32_t>(
+						 buf->readableBytes() - size_before);
+					 std::size_t n = sizeof(len);
+					 buf->ensureWritableBytes(n);
+					 std::copy(buf->data_.data() + buf->wptr_ - len,
+							   buf->data_.data() + buf->wptr_,
+							   buf->data_.data() + buf->wptr_ - len + n);
+					 buf->wptr_ -= len;
 					 SerializeTraits<std::uint32_t>::serialize(buf, len);
+					 buf->wptr_ += len;
+					 //  Buffer tmp{};
+					 //  SerializeTraits<FieldType>::serialize(&tmp,
+					 // 									   std::get<Is>(t));
 
-					 buf->append(tmp.peek(), tmp.readableBytes());
+					 //  std::uint32_t len =
+					 // 	 static_cast<std::uint32_t>(tmp.readableBytes());
+					 //  SerializeTraits<std::uint32_t>::serialize(buf, len);
+
+					 //  buf->append(tmp.peek(), tmp.readableBytes());
 				 }
 				 else
 				 {

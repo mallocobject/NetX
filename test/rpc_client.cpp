@@ -6,6 +6,7 @@
 #include "rac/net/stream.hpp"
 #include "rac/rpc/rpc_header.hpp"
 #include "rac/rpc/serialize_traits.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <sys/socket.h>
 
@@ -31,15 +32,18 @@ Task<> connect_server(int fd)
 {
 	Stream s{fd};
 
-	Buffer payload;
+	// Buffer payload;
 
-	std::string method_name = "EchoUser";
-	SerializeTraits<std::string>::serialize(&payload, method_name);
+	std::size_t size_before = s.write_buffer()->readableBytes();
+	std::string method_name = "AddPoint";
+	SerializeTraits<std::string>::serialize(s.write_buffer(), method_name);
 
-	using ArgsType = std::tuple<User>;
-	ArgsType args{{123, "Alice", {1.0, 2.0}, "alice@github.com", 13800138000}};
+	using ArgsType = std::tuple<Point, Point>;
+	// ArgsType args{{123, "Alice", {1.0, 2.0}, "alice@github.com",
+	// 13800138000}};
+	ArgsType args{{1.2, 3.6}, {5.8, 9.2}};
 
-	SerializeTraits<ArgsType>::serialize(&payload, args);
+	SerializeTraits<ArgsType>::serialize(s.write_buffer(), args);
 
 	RpcHeader h{.magic = kMagic,
 				.version = kVersion,
@@ -49,10 +53,11 @@ Task<> connect_server(int fd)
 				.request_id = 0,
 				.reserved = 0};
 
-	h.body_len = payload.readableBytes();
+	h.body_len = static_cast<std::uint32_t>(s.write_buffer()->readableBytes() -
+											size_before);
 
-	s.write_buffer()->appendRpcHeader(h);
-	s.write_buffer()->append(payload.peek(), payload.readableBytes());
+	s.write_buffer()->prependRpcHeader(h);
+
 	co_await s.write();
 
 	while (s.read_buffer()->readableBytes() < sizeof(RpcHeaderWire))
@@ -81,16 +86,18 @@ Task<> connect_server(int fd)
 
 	std::cout << h << std::endl;
 
-	using RetType = std::tuple<User>;
+	using RetType = std::tuple<Point>;
 	RetType ret;
 
 	DeserializeTraits<RetType>::deserialize(s.read_buffer(), &ret);
 
-	auto usr = std::get<0>(ret);
+	auto& res = std::get<0>(ret);
 
-	std::cout << "ID: " << usr.id << "\n";
-	std::cout << "Name: " << usr.name << "\n";
-	std::cout << "Location: (" << usr.loc.x << ", " << usr.loc.y << ")\n";
+	// std::cout << "ID: " << usr.id << "\n";
+	// std::cout << "Name: " << usr.name << "\n";
+	// std::cout << "Location: (" << usr.loc.x << ", " << usr.loc.y << ")\n";
+	std::cout << "x: " << res.x << std::endl;
+	std::cout << "y: " << res.y << std::endl;
 }
 
 int main()
