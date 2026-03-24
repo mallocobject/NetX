@@ -123,6 +123,11 @@ struct EventLoop
 		return loop;
 	}
 
+	int epfd() const noexcept
+	{
+		return poller.epfd();
+	}
+
 	EventLoop(EventLoop&&) = delete;
 	~EventLoop() = default;
 

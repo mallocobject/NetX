@@ -11,6 +11,7 @@ struct HandleInfo
 {
 	HandleId id{};
 	Handle* handle{nullptr};
+	int bootstrap_fd{-1};
 
 	std::strong_ordering operator<=>(const HandleInfo& other) const
 	{

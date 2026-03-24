@@ -4,6 +4,7 @@
 #include "rac/async/check_error.hpp"
 #include "rac/async/event.hpp"
 #include <cassert>
+#include <cinttypes>
 #include <cstdint>
 #include <sys/epoll.h>
 #include <unistd.h>
@@ -64,13 +65,27 @@ struct EpollPoller
 		for (int i = 0; i < nevs; i++)
 		{
 			auto handle_info = reinterpret_cast<HandleInfo*>(evs[i].data.ptr);
-			if (handle_info->handle)
+			if (handle_info->bootstrap_fd != -1)
+			{
+				int fd = handle_info->bootstrap_fd;
+				delete handle_info; // 释放内存
+
+				epoll_ctl(epfd_, EPOLL_CTL_DEL, fd, nullptr);
+
+				co_spawn(handleClient(fd));
+			}
+			else if (handle_info->handle)
 			{
 				result.emplace_back(*handle_info);
 			}
 		}
 
 		return result;
+	}
+
+	int epfd() const noexcept
+	{
+		return epfd_;
 	}
 
   private:
