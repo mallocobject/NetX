@@ -286,10 +286,9 @@ void deserialize_tuple_tlv_impl(Buffer* buf, Tuple* t,
 		{
 			skip_unknown_field(buf, wt);
 		}
-
-		assert(buf->readableBytes() == target_remaining &&
-			   "TLV parse error: length mismatch!");
 	}
+	assert(buf->readableBytes() == target_remaining &&
+		   "TLV parse error: length mismatch!");
 }
 
 template <typename... Args> struct SerializeTraits<std::tuple<Args...>>

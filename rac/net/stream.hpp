@@ -101,8 +101,8 @@ class Stream
 		write_buf_.append(str);
 		while (write_buf_.readableBytes() > 0)
 		{
-			ssize_t n = ::write(write_fd_, write_buf_.peek(),
-								write_buf_.readableBytes());
+			ssize_t n = ::send(write_fd_, write_buf_.peek(),
+							   write_buf_.readableBytes(), MSG_NOSIGNAL);
 			if (n > 0)
 			{
 				write_buf_.retrieve(n);
@@ -137,7 +137,7 @@ class Stream
 
 	int fd() const noexcept
 	{
-		assert(read_fd_ == write_fd_);
+		assert(read_fd_ != write_fd_);
 		return read_fd_;
 	}
 

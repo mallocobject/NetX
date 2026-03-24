@@ -4,6 +4,7 @@
 #include "rac/async/non_void_helper.hpp"
 #include "rac/async/sleep.hpp"
 #include "rac/async/task.hpp"
+#include <stdexcept>
 
 using namespace rac;
 using namespace std::chrono_literals;
@@ -12,6 +13,7 @@ Task<> task1()
 {
 	co_await sleep(5s);
 	LOG_INFO << "hello";
+	throw std::runtime_error("exception");
 	co_return;
 }
 
