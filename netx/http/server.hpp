@@ -36,8 +36,8 @@ class HttpServer : public net::Server<HttpServer>
   private:
     static async::Task<> graceful_close(
 		net::Stream& s,
-		std::chrono::milliseconds drain_timeout = std::chrono::milliseconds(200));
-	async::Task<> handleClient(int conn_fd);
+		std::chrono::milliseconds drain_timeout = std::chrono::milliseconds(10));
+	async::Task<> handleClient(int read_fd, int write_fd);
 
 	// async::Task<> serverLoop();
 
@@ -66,9 +66,9 @@ inline async::Task<> HttpServer::graceful_close(
     }
 }
 
-inline async::Task<> HttpServer::handleClient(int conn_fd)
+inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 {
-    net::Stream s{conn_fd};
+    net::Stream s{read_fd, write_fd};
     Session session{};
 
     try {
@@ -78,7 +78,7 @@ inline async::Task<> HttpServer::handleClient(int conn_fd)
 
             if (ret.index() == 1) 
             {
-				elog::LOG_WARN("Connection timeout on fd: {}", conn_fd);
+				elog::LOG_WARN("Connection timeout on fd: {}", read_fd);
                 co_await s.write(
                     "HTTP/1.1 408 Request Timeout\r\n"
                     "Content-Length: 0\r\n"

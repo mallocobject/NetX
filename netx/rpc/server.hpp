@@ -38,7 +38,7 @@ class RpcServer : public net::Server<RpcServer>
 	}
 
   private:
-	async::Task<> handleClient(int conn_fd);
+	async::Task<> handleClient(int read_fd, int write_fd);
 
 	// async::Task<> serverLoop();
 
@@ -46,9 +46,9 @@ class RpcServer : public net::Server<RpcServer>
 	RpcDispatcher dispatcher_{};
 };
 
-inline async::Task<> RpcServer::handleClient(int conn_fd)
+inline async::Task<> RpcServer::handleClient(int read_fd, int write_fd)
 {
-	net::Stream s{conn_fd};
+	net::Stream s{read_fd, write_fd};
 
 	try
 	{

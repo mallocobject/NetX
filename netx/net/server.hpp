@@ -26,11 +26,12 @@ template <typename Derived> class Server
   protected:
 	Server() : stream_(async::checkError(net::Socket::socket(nullptr)))
 	{
-		idle_fd_ = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
-		if (idle_fd_ == -1)
+		idle_fd_[0] = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+		if (idle_fd_[0] == -1)
 		{
 			::elog::LOG_WARN("open /dev/null failed: {}", ::strerror(errno));
 		}
+		idle_fd_[1] = dup(idle_fd_[0]);
 	}
 
   public:
@@ -97,9 +98,9 @@ template <typename Derived> class Server
 	}
 
   protected:
-	async::Task<> handleClient(int conn_fd)
+	async::Task<> handleClient(int read_fd, int write_fd)
 	{
-		return static_cast<Derived*>(this)->handleClient(conn_fd);
+		return static_cast<Derived*>(this)->handleClient(read_fd, write_fd);
 	}
 
 	async::Task<> serverLoop();
@@ -112,7 +113,7 @@ template <typename Derived> class Server
 	std::mutex schedulers_mutex_;
 	std::vector<std::jthread> loops_;
 
-	int idle_fd_{-1};
+	int idle_fd_[2] = {-1, -1};
 
 	std::chrono::nanoseconds timeout_{std::chrono::nanoseconds::max()};
 };
@@ -147,14 +148,37 @@ template <typename Derived> inline async::Task<> Server<Derived>::serverLoop()
 						std::this_thread::sleep_for(std::chrono::milliseconds(10));
 						emfile_count = 0;
 					}
-					Socket::close(idle_fd_);
+					Socket::close(idle_fd_[0]);
+					Socket::close(idle_fd_[1]);
 					conn_fd = Socket::accept(listen_fd, nullptr, nullptr);
-					Socket::close(conn_fd);
-					idle_fd_ = open("/dev/null", O_RDONLY | O_CLOEXEC);
+					if (conn_fd >= 0)
+					{
+						Socket::close(conn_fd);
+					}
+					idle_fd_[0] = open("/dev/null", O_RDONLY | O_CLOEXEC);
+					idle_fd_[1] = (idle_fd_[0] >= 0) ? ::dup(idle_fd_[0]) : -1;
 					::elog::LOG_ERROR("EMFILE: Out of file descriptors!");
 					break;
 				default:
 					async::checkError(saved_errno);
+					break;
+				}
+				break;
+			}
+
+			int dup_conn_fd = ::dup(conn_fd);
+			if (dup_conn_fd < 0)
+			{
+				int dup_errno = errno;
+				Socket::close(conn_fd);
+
+				switch (dup_errno)
+				{
+				case EMFILE:
+					::elog::LOG_ERROR("dup failed: {}", ::strerror(dup_errno));
+					break;
+				default:
+					async::checkError(dup_errno);
 					break;
 				}
 				break;
@@ -165,7 +189,7 @@ template <typename Derived> inline async::Task<> Server<Derived>::serverLoop()
 
 			assert(schedulers_ptr_.size() >= 1);
 			auto lucky = schedulers_ptr_[lucky_boy++ % schedulers_ptr_.size()];
-			lucky->push(handleClient(conn_fd));
+			lucky->push(handleClient(conn_fd, dup_conn_fd));
 			lucky->wakeup();
 		}
 	}

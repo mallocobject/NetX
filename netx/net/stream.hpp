@@ -32,6 +32,13 @@ class Stream
 		Socket::setNonBlocking(write_fd_);
 	}
 
+	explicit Stream(int read_fd, int write_fd) : read_fd_(read_fd), write_fd_(write_fd)
+	{
+		// Socket::getSockname(read_fd_, &sock_addr_);
+		Socket::setNonBlocking(read_fd_);
+		Socket::setNonBlocking(write_fd_);
+	}
+
 	Stream(int fd, InetAddr sock_addr)
 		: read_fd_(fd), write_fd_(dup(fd)), sock_addr_(std::move(sock_addr))
 	{
