@@ -50,63 +50,68 @@ inline async::Task<> RpcServer::handleClient(int conn_fd)
 {
 	net::Stream s{conn_fd};
 
-	while (true)
+	try
 	{
-		while (s.read_buffer()->readableBytes() < sizeof(RpcHeaderWire))
+		while (true)
 		{
-			auto rd_buf = co_await s.read();
-			if (!rd_buf)
+			while (s.read_buffer()->readableBytes() < sizeof(RpcHeaderWire))
 			{
-				::elog::LOG_ERROR(
-					"Connection closed by peer before reading header in fd {}",
-					s.fd());
+				if (!co_await s.read())
+				{
+					::elog::LOG_ERROR(
+						"Connection closed by peer before reading header in fd {}",
+						s.read_fd());
 
-				s.close();
-				co_return;
+					s.close();
+					co_return;
+				}
 			}
-		}
 
-		RpcHeader h = s.read_buffer()->peekRpcHeader();
-		std::size_t total_len = h.header_len + h.body_len;
+			RpcHeader h = s.read_buffer()->peekRpcHeader();
+			std::size_t total_len = h.header_len + h.body_len;
 
-		while (s.read_buffer()->readableBytes() < total_len)
-		{
-			auto rd_buf = co_await s.read();
-			if (!rd_buf)
+			while (s.read_buffer()->readableBytes() < total_len)
 			{
-				::elog::LOG_ERROR(
-					"Connection closed by peer before reading body in fd {}",
-					s.fd());
+				if (!co_await s.read())
+				{
+					::elog::LOG_ERROR(
+						"Connection closed by peer before reading body in fd {}",
+						s.read_fd());
 
-				s.close();
-				co_return;
+					s.close();
+					co_return;
+				}
 			}
+
+			s.read_buffer()->retrieve(h.header_len);
+			std::size_t readable_before = s.read_buffer()->readableBytes();
+
+			std::string method_name;
+			DeserializeTraits<std::string>::deserialize(s.read_buffer(),
+														&method_name);
+
+			// LOG_DEBUG("Client requesting method: {}" ,method_name);
+
+			std::size_t consumed =
+				readable_before - s.read_buffer()->readableBytes();
+			std::uint32_t args_limit = h.body_len - consumed;
+
+			std::size_t size_before = s.write_buffer()->readableBytes();
+
+			dispatcher_.dispatch(method_name, s.read_buffer(), s.write_buffer(),
+								args_limit);
+
+			h.body_len = static_cast<uint32_t>(s.write_buffer()->readableBytes() -
+											size_before);
+			s.write_buffer()->prependRpcHeader(h);
+
+			co_await s.write();
 		}
-
-		s.read_buffer()->retrieve(h.header_len);
-		std::size_t readable_before = s.read_buffer()->readableBytes();
-
-		std::string method_name;
-		DeserializeTraits<std::string>::deserialize(s.read_buffer(),
-													&method_name);
-
-		// LOG_DEBUG("Client requesting method: {}" ,method_name);
-
-		std::size_t consumed =
-			readable_before - s.read_buffer()->readableBytes();
-		std::uint32_t args_limit = h.body_len - consumed;
-
-		std::size_t size_before = s.write_buffer()->readableBytes();
-
-		dispatcher_.dispatch(method_name, s.read_buffer(), s.write_buffer(),
-							 args_limit);
-
-		h.body_len = static_cast<uint32_t>(s.write_buffer()->readableBytes() -
-										   size_before);
-		s.write_buffer()->prependRpcHeader(h);
-
-		co_await s.write();
 	}
+	catch (const std::exception& e) 
+	{
+        elog::LOG_ERROR("Exception in handleClient: {}", e.what());
+    }
 }
 } // namespace rpc
 } // namespace netx

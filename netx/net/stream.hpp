@@ -105,9 +105,14 @@ class Stream
 		return &write_buf_;
 	}
 
-	int fd() const noexcept
+	int read_fd() const noexcept
 	{
 		return read_fd_;
+	}
+
+	int write_fd() const noexcept
+	{
+		return write_fd_;
 	}
 
   private:

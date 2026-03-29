@@ -85,7 +85,7 @@ class RpcClient
 	explicit RpcClient(const net::InetAddr& sock_addr)
 		: stream_(async::checkError(net::Socket::socket(nullptr)), sock_addr)
 	{
-		while (!net::Socket::connect(stream_.fd(), sock_addr, nullptr))
+		while (!net::Socket::connect(stream_.read_fd(), sock_addr, nullptr))
 		{
 		}
 

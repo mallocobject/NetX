@@ -15,6 +15,7 @@
 #include <vector>
 #include <chrono>
 #include <csignal>
+#include <mutex>
 namespace netx
 {
 namespace net
@@ -38,7 +39,7 @@ template <typename Derived> class Server
 	Derived& listen(const net::InetAddr& sock_addr)
 	{
 		stream_.bind(sock_addr);
-		int listen_fd = stream_.fd();
+		int listen_fd = stream_.read_fd();
 		net::Socket::setReuseAddr(listen_fd, true);
 		async::checkError(net::Socket::bind(listen_fd, sock_addr, nullptr));
 		async::checkError(net::Socket::listen(listen_fd, nullptr));
@@ -80,7 +81,10 @@ template <typename Derived> class Server
 				[this, &start_latch]
 				{
 					net::Scheduler scheduler{};
-					schedulers_ptr_.push_back(&scheduler);
+					{
+						std::lock_guard<std::mutex> lock(schedulers_mutex_);
+						schedulers_ptr_.push_back(&scheduler);
+					}
 					async_main(scheduler.schedulerLoop(start_latch));
 				});
 		}
@@ -105,6 +109,7 @@ template <typename Derived> class Server
 	std::size_t loop_count_{0};
 
 	std::vector<net::Scheduler*> schedulers_ptr_;
+	std::mutex schedulers_mutex_;
 	std::vector<std::jthread> loops_;
 
 	int idle_fd_{-1};
@@ -114,7 +119,7 @@ template <typename Derived> class Server
 
 template <typename Derived> inline async::Task<> Server<Derived>::serverLoop()
 {
-	int listen_fd = stream_.fd();
+	int listen_fd = stream_.read_fd();
 	async::Event ev{.fd = listen_fd, .flags = EPOLLIN};
 	auto ev_awaiter = async::EventLoop::loop().wait_event(ev);
 	static std::size_t lucky_boy = 0;

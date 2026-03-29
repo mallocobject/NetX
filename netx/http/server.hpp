@@ -34,6 +34,9 @@ class HttpServer : public net::Server<HttpServer>
 	}
 
   private:
+    static async::Task<> graceful_close(
+		net::Stream& s,
+		std::chrono::milliseconds drain_timeout = std::chrono::milliseconds(200));
 	async::Task<> handleClient(int conn_fd);
 
 	// async::Task<> serverLoop();
@@ -41,6 +44,27 @@ class HttpServer : public net::Server<HttpServer>
   private:
 	HttpRouter router_{};
 };
+
+inline async::Task<> HttpServer::graceful_close(
+    net::Stream& s,
+    std::chrono::milliseconds drain_timeout)
+{
+    s.shutdown();
+    s.read_buffer()->retrieve(s.read_buffer()->readableBytes());
+
+    while (true)
+    {
+        auto ret =
+            co_await async::when_any(s.read(), async::sleep(drain_timeout));
+
+        if (ret.index() == 1 || !std::get<0>(ret))
+        {
+            break;
+        }
+
+        s.read_buffer()->retrieve(s.read_buffer()->readableBytes());
+    }
+}
 
 inline async::Task<> HttpServer::handleClient(int conn_fd)
 {
@@ -50,34 +74,39 @@ inline async::Task<> HttpServer::handleClient(int conn_fd)
     try {
         while (true)
         {
-            // s.read() 返回 Task<bool>，true 表示读到了数据，false 表示 EOF（客户端关闭）
-            // async::sleep() 返回 Task<void>
             auto ret = co_await async::when_any(s.read(), async::sleep(timeout_));
 
-            // 索引 0 是 s.read() 的结果 (bool)
-            // 索引 1 是 sleep() 的结果 (NonVoidHelper<void>)
             if (ret.index() == 1) 
             {
-                elog::LOG_WARN("Connection timeout on fd: {}", s.fd());
-                co_await s.write("HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-                s.shutdown(); 
-				co_await async::when_any(s.read(), async::sleep(std::chrono::seconds(1)));
-				break;
+				elog::LOG_WARN("Connection timeout on fd: {}", conn_fd);
+                co_await s.write(
+                    "HTTP/1.1 408 Request Timeout\r\n"
+                    "Content-Length: 0\r\n"
+                    "Connection: close\r\n"
+                    "\r\n"
+                );
+                co_await graceful_close(s);
+				co_return;
             }
 
-            bool read_ok = std::get<0>(ret);
-            if (!read_ok) 
+            if (!std::get<0>(ret)) 
             {
-                break;
+                co_return;
             }
 
             while (s.read_buffer()->readableBytes() > 0)
             {
                 if (!session.parse(s.read_buffer()))
 				{
-					co_await s.write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
-					s.shutdown();
-					co_await async::when_any(s.read(), async::sleep(std::chrono::seconds(1)));
+					// elog::LOG_FATAL("{}", s.write_fd());
+                    co_await s.write(
+                        "HTTP/1.1 400 Bad Request\r\n"
+                        "Content-Length: 0\r\n"
+                        "Connection: close\r\n"
+                        "\r\n"
+                    );
+					
+                    co_await graceful_close(s);
 					co_return;
 				}
 
@@ -89,18 +118,11 @@ inline async::Task<> HttpServer::handleClient(int conn_fd)
                     co_await router_.dispatch(req, &res, &s);
 
                     std::string conn_header = req.header("connection");
-                    bool keep_alive = true;
                     if (conn_header == "close" ||
                         (req.version == "HTTP/1.0" && conn_header != "keep-alive"))
                     {
-                        keep_alive = false;
-                    }
-
-                    if (!keep_alive)
-                    {
-                        s.shutdown();
-						co_await async::when_any(s.read(), async::sleep(std::chrono::seconds(2)));
-						co_return;
+                        co_await graceful_close(s);
+					    co_return;
                     }
 
                     session.clear();
@@ -112,7 +134,8 @@ inline async::Task<> HttpServer::handleClient(int conn_fd)
             }
         }
     }
-    catch (const std::exception& e) {
+    catch (const std::exception& e) 
+	{
         elog::LOG_ERROR("Exception in handleClient: {}", e.what());
     }
 

@@ -28,6 +28,11 @@ struct Session
 
 	bool parse(net::Buffer* buf);
 
+	HttpParser::State parser_state() const noexcept
+	{
+		return parser_.state();
+	}
+
 	Session() = default;
 	Session(Session&&) = delete;
 	~Session() = default;

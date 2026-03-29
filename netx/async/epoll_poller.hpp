@@ -67,7 +67,7 @@ struct EpollPoller
 		for (int i = 0; i < nevs; i++)
 		{
 			auto handle_info = reinterpret_cast<HandleInfo*>(evs[i].data.ptr);
-			if (handle_info->handle)
+			if (handle_info && handle_info->handle)
 			{
 				result.emplace_back(*handle_info);
 			}

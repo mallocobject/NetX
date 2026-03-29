@@ -1,7 +1,3 @@
-# set(LIB_SOURCES)
-
-# file(GLOB LIB_SOURCES CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
-
 add_library(netx INTERFACE)
 
 target_include_directories(netx
