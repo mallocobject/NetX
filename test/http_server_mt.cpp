@@ -1,6 +1,4 @@
 #include "netx/http/server.hpp"
-#include <csignal>
-#include <string>
 
 using namespace netx::http;
 using namespace netx::net;
@@ -15,13 +13,13 @@ int main()
             "GET", "/",
             [](const HttpRequest& req, HttpResponse* res, Stream* stream) -> Task<>
             {
-                res->set_status(200);
-                res->set_content_type("text/html");
-                res->keep_alive(
+                res->status(200)
+                .content_type("text/html")
+                .keep_alive(
                     req.header("connection") != "close" &&
                     !(req.version == "HTTP/1.0" &&
-                    req.header("connection") != "keep-alive"));
-                res->set_body("<h1>Hello Netx</h1>");
+                    req.header("connection") != "keep-alive"))
+                .body("<h1>Hello Netx</h1>");
 
                 co_await stream->write(res->to_formatted_string());
             })

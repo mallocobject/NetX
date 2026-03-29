@@ -12,7 +12,7 @@ namespace http
 struct HttpResponse
 {
 
-	HttpResponse& set_status(int code) noexcept
+	HttpResponse& status(int code) noexcept
 	{
 		status_code_ = code;
 		status_msg_ = code2msg(code);
@@ -20,32 +20,32 @@ struct HttpResponse
 		return *this;
 	}
 
-	HttpResponse& set_header(const std::string& key, const std::string& value)
+	HttpResponse& header(const std::string& key, const std::string& value)
 	{
 		header_params_[key] = value;
 
 		return *this;
 	}
 
-	HttpResponse& set_body(const std::string& body)
+	HttpResponse& body(const std::string& body)
 	{
 		body_ = body;
-		set_header("Content-Length", std::to_string(body_.size()));
+		header("Content-Length", std::to_string(body_.size()));
 
 		return *this;
 	}
 
-	HttpResponse& set_body(std::string&& body)
+	HttpResponse& body(std::string&& body)
 	{
 		body_ = std::move(body);
-		set_header("Content-Length", std::to_string(body_.size()));
+		header("Content-Length", std::to_string(body_.size()));
 
 		return *this;
 	}
 
-	HttpResponse& set_content_type(const std::string& type)
+	HttpResponse& content_type(const std::string& type)
 	{
-		set_header("Content-Type", type);
+		header("Content-Type", type);
 
 		return *this;
 	}
@@ -54,11 +54,11 @@ struct HttpResponse
 	{
 		if (on)
 		{
-			set_header("Connection", "keep-alive");
+			header("Connection", "keep-alive");
 		}
 		else
 		{
-			set_header("Connection", "close");
+			header("Connection", "close");
 		}
 
 		return *this;

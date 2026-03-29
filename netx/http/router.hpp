@@ -163,9 +163,9 @@ inline TaskType HttpRouter::dispatch(const HttpRequest& req, HttpResponse* res,
 	}
 	else
 	{
-		res->set_status(404);
-		res->set_content_type("text/html");
-		res->set_body("<h1>404 Not Found</h1>");
+		res->status(404)
+		.content_type("text/html")
+		.body("<h1>404 Not Found</h1>");
 
 		co_await stream->write(res->to_formatted_string());
 
