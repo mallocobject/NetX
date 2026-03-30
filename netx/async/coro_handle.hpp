@@ -26,7 +26,8 @@ struct CoroHandle : public Handle
 
 	void schedule()
 	{
-		if (state_ == Handle::State::kUnScheduled || state_ == Handle::State::kSuspend)
+		if (state_ == Handle::State::kUnScheduled ||
+			state_ == Handle::State::kSuspend)
 		{
 			EventLoop::loop().call_soon(*this);
 		}

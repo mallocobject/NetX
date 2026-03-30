@@ -49,9 +49,9 @@ class HttpRouter
 	};
 
   public:
-  template <typename Handler>
+	template <typename Handler>
 	void route(const std::string& method, const std::string& path,
-			    Handler&& handler)
+			   Handler&& handler)
 	{
 		trees_[method].insert(path, std::forward<Handler>(handler));
 	}
@@ -164,8 +164,8 @@ inline TaskType HttpRouter::dispatch(const HttpRequest& req, HttpResponse* res,
 	else
 	{
 		res->status(404)
-		.content_type("text/html")
-		.body("<h1>404 Not Found</h1>");
+			.content_type("text/html")
+			.body("<h1>404 Not Found</h1>");
 
 		co_await stream->write(res->to_formatted_string());
 

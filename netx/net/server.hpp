@@ -8,14 +8,14 @@
 #include "netx/net/scheduler.hpp"
 #include "netx/net/socket.hpp"
 #include "netx/net/stream.hpp"
+#include <chrono>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <latch>
+#include <mutex>
 #include <thread>
 #include <vector>
-#include <chrono>
-#include <csignal>
-#include <mutex>
 namespace netx
 {
 namespace net
@@ -56,7 +56,8 @@ template <typename Derived> class Server
 	template <typename Rep, typename Period>
 	Derived& timeout(std::chrono::duration<Rep, Period> duration)
 	{
-		timeout_ = std::chrono::duration_cast<std::chrono::nanoseconds>(duration);
+		timeout_ =
+			std::chrono::duration_cast<std::chrono::nanoseconds>(duration);
 		return *static_cast<Derived*>(this);
 	}
 
@@ -92,7 +93,7 @@ template <typename Derived> class Server
 		start_latch.wait();
 
 		::elog::LOG_WARN("Netx-Server listening on {}",
-                 stream_.sock_addr().to_formatted_string());
+						 stream_.sock_addr().to_formatted_string());
 
 		async_main(serverLoop());
 	}
@@ -144,8 +145,10 @@ template <typename Derived> inline async::Task<> Server<Derived>::serverLoop()
 					break;
 				case EMFILE:
 					emfile_count++;
-					if (emfile_count > 5) {
-						std::this_thread::sleep_for(std::chrono::milliseconds(10));
+					if (emfile_count > 5)
+					{
+						std::this_thread::sleep_for(
+							std::chrono::milliseconds(10));
 						emfile_count = 0;
 					}
 					Socket::close(idle_fd_[0]);

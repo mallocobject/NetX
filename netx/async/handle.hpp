@@ -1,8 +1,8 @@
 #ifndef NETX_ASYNC_HANDLE_HPP
 #define NETX_ASYNC_HANDLE_HPP
 
-#include <cstdint>
 #include <atomic>
+#include <cstdint>
 namespace netx
 {
 namespace async
@@ -19,7 +19,9 @@ struct Handle
 		kCancelled,
 	};
 
-	Handle() noexcept : handle_id_(handle_id_generation_.fetch_add(1, std::memory_order_acq_rel))
+	Handle() noexcept
+		: handle_id_(
+			  handle_id_generation_.fetch_add(1, std::memory_order_acq_rel))
 	{
 	}
 

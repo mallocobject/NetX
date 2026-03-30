@@ -8,7 +8,6 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <vector>
-#include <iostream>
 namespace netx
 {
 namespace async

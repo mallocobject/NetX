@@ -217,7 +217,8 @@ inline async::Task<> RpcClient::readLoop()
 			}
 			else
 			{
-				::elog::LOG_ERROR("Received unknown request_id: {}", h.request_id);
+				::elog::LOG_ERROR("Received unknown request_id: {}",
+								  h.request_id);
 			}
 		}
 	}

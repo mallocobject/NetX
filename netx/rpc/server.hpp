@@ -58,9 +58,9 @@ inline async::Task<> RpcServer::handleClient(int read_fd, int write_fd)
 			{
 				if (!co_await s.read())
 				{
-					::elog::LOG_ERROR(
-						"Connection closed by peer before reading header in fd {}",
-						s.read_fd());
+					::elog::LOG_ERROR("Connection closed by peer before "
+									  "reading header in fd {}",
+									  s.read_fd());
 
 					s.close();
 					co_return;
@@ -74,9 +74,9 @@ inline async::Task<> RpcServer::handleClient(int read_fd, int write_fd)
 			{
 				if (!co_await s.read())
 				{
-					::elog::LOG_ERROR(
-						"Connection closed by peer before reading body in fd {}",
-						s.read_fd());
+					::elog::LOG_ERROR("Connection closed by peer before "
+									  "reading body in fd {}",
+									  s.read_fd());
 
 					s.close();
 					co_return;
@@ -99,19 +99,19 @@ inline async::Task<> RpcServer::handleClient(int read_fd, int write_fd)
 			std::size_t size_before = s.write_buffer()->readableBytes();
 
 			dispatcher_.dispatch(method_name, s.read_buffer(), s.write_buffer(),
-								args_limit);
+								 args_limit);
 
-			h.body_len = static_cast<uint32_t>(s.write_buffer()->readableBytes() -
-											size_before);
+			h.body_len = static_cast<uint32_t>(
+				s.write_buffer()->readableBytes() - size_before);
 			s.write_buffer()->prependRpcHeader(h);
 
 			co_await s.write();
 		}
 	}
-	catch (const std::exception& e) 
+	catch (const std::exception& e)
 	{
-        elog::LOG_ERROR("Exception in handleClient: {}", e.what());
-    }
+		elog::LOG_ERROR("Exception in handleClient: {}", e.what());
+	}
 }
 } // namespace rpc
 } // namespace netx

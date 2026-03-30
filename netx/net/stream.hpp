@@ -32,7 +32,8 @@ class Stream
 		Socket::setNonBlocking(write_fd_);
 	}
 
-	explicit Stream(int read_fd, int write_fd) : read_fd_(read_fd), write_fd_(write_fd)
+	explicit Stream(int read_fd, int write_fd)
+		: read_fd_(read_fd), write_fd_(write_fd)
 	{
 		// Socket::getSockname(read_fd_, &sock_addr_);
 		Socket::setNonBlocking(read_fd_);
@@ -171,8 +172,8 @@ inline async::Task<bool> Stream::write(const std::string& str)
 	{
 		// ssize_t n = ::send(write_fd_, write_buf_.peek(),
 		// 				   write_buf_.readableBytes(), MSG_NOSIGNAL);
-		ssize_t n = ::write(write_fd_, write_buf_.peek(),
-						   write_buf_.readableBytes());
+		ssize_t n =
+			::write(write_fd_, write_buf_.peek(), write_buf_.readableBytes());
 		if (n > 0)
 		{
 			write_buf_.retrieve(n);

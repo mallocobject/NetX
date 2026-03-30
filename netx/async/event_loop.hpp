@@ -1,6 +1,7 @@
 #ifndef NETX_ASYNC_EVENT_LOOP_HPP
 #define NETX_ASYNC_EVENT_LOOP_HPP
 
+#include "elog/logger.hpp"
 #include "netx/async/epoll_poller.hpp"
 #include "netx/async/event.hpp"
 #include "netx/async/handle.hpp"
@@ -12,7 +13,6 @@
 #include <set>
 #include <unordered_set>
 #include <utility>
-#include "elog/logger.hpp"
 namespace netx
 {
 namespace async
@@ -34,8 +34,8 @@ struct EventLoop
 	}
 
 	void call_at(TimePoint time_point, Handle& handle)
-	{	
-		if (handle.state() == Handle::State::kCancelled) 
+	{
+		if (handle.state() == Handle::State::kCancelled)
 		{
 			return;
 		}
@@ -146,7 +146,8 @@ struct EventLoop
 
 	void print_size() const noexcept
 	{
-		elog::LOG_FATAL("{}, {}, {}", ready_.size(), schedule_.size(), cancelled_.size());
+		elog::LOG_FATAL("{}, {}, {}", ready_.size(), schedule_.size(),
+						cancelled_.size());
 	}
 
 	EventLoop(EventLoop&&) = delete;
@@ -233,14 +234,13 @@ inline void EventLoop::runOnce()
 			continue;
 		}
 
-		if (info.handle->state() != Handle::State::kCancelled) 
+		if (info.handle->state() != Handle::State::kCancelled)
 		{
 			info.handle->setState(
-			Handle::State::kUnScheduled); // 先设置状态，再
-											// run，防止覆盖后续状态
+				Handle::State::kUnScheduled); // 先设置状态，再
+											  // run，防止覆盖后续状态
 			info.handle->run();
 		}
-		
 	}
 
 	cleanupDelayedCall();

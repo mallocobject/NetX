@@ -9,21 +9,20 @@ int main()
 {
 	HttpServer::server()
 		.listen("127.0.0.1", 8080)
-		.route(
-            "GET", "/",
-            [](const HttpRequest& req, HttpResponse* res, Stream* stream) -> Task<>
-            {
-                res->status(200)
-                .content_type("text/html")
-                .keep_alive(
-                    req.header("connection") != "close" &&
-                    !(req.version == "HTTP/1.0" &&
-                    req.header("connection") != "keep-alive"))
-                .body("<h1>Hello Netx</h1>");
+		.route("GET", "/",
+			   [](const HttpRequest& req, HttpResponse* res,
+				  Stream* stream) -> Task<>
+			   {
+				   res->status(200)
+					   .content_type("text/html")
+					   .keep_alive(req.header("connection") != "close" &&
+								   !(req.version == "HTTP/1.0" &&
+									 req.header("connection") != "keep-alive"))
+					   .body("<h1>Hello Netx</h1>");
 
-                co_await stream->write(res->to_formatted_string());
-            })
-        .timeout(3s)
+				   co_await stream->write(res->to_formatted_string());
+			   })
+		.timeout(3s)
 		.loop(8)
 		.start();
 }
