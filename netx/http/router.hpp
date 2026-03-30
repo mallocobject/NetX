@@ -168,8 +168,6 @@ inline TaskType HttpRouter::dispatch(const HttpRequest& req, HttpResponse* res,
 			.body("<h1>404 Not Found</h1>");
 
 		co_await stream->write(res->to_formatted_string());
-
-		co_return;
 	}
 }
 } // namespace http

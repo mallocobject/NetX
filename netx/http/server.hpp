@@ -1,12 +1,14 @@
 #ifndef NETX_HTTP_SERVER_HPP
 #define NETX_HTTP_SERVER_HPP
 
+#include "elog/logger.hpp"
 #include "netx/async/sleep.hpp"
 #include "netx/async/when_any.hpp"
 #include "netx/http/router.hpp"
 #include "netx/http/session.hpp"
 #include "netx/net/server.hpp"
 #include "netx/net/stream.hpp"
+#include <chrono>
 namespace netx
 {
 namespace http
@@ -34,38 +36,15 @@ class HttpServer : public net::Server<HttpServer>
 	}
 
   private:
-	// static async::Task<> graceful_close(
-	// 	net::Stream& s, std::chrono::milliseconds drain_timeout =
-	// 						std::chrono::milliseconds(10));
 	async::Task<> handleClient(int read_fd, int write_fd);
 
   private:
 	HttpRouter router_{};
 };
 
-// ungraceful
-// inline async::Task<> HttpServer::graceful_close(
-// 	net::Stream& s, std::chrono::milliseconds drain_timeout)
-// {
-// 	s.shutdown();
-// 	s.read_buffer()->retrieve(s.read_buffer()->readableBytes());
-
-// 	while (true)
-// 	{
-// 		auto ret =
-// 			co_await async::when_any(s.read(), async::sleep(drain_timeout));
-
-// 		if (ret.index() == 1 || !std::get<0>(ret))
-// 		{
-// 			break;
-// 		}
-
-// 		s.read_buffer()->retrieve(s.read_buffer()->readableBytes());
-// 	}
-// }
-
 inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 {
+
 	net::Stream s{read_fd, write_fd};
 	Session session{};
 
@@ -76,21 +55,21 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 			auto ret =
 				co_await async::when_any(s.read(), async::sleep(timeout_));
 
+			// if (s.write_fd() == -1)
+			// {
+			// 	co_return;
+			// }
+
 			if (ret.index() == 1)
 			{
-				// if shutdown(WR)
-				if (s.write_fd() == -1)
-				{
-					co_return;
-				}
+
 				elog::LOG_WARN("Connection timeout on fd: {}", read_fd);
 				co_await s.write("HTTP/1.1 408 Request Timeout\r\n"
 								 "Content-Length: 0\r\n"
 								 "Connection: close\r\n"
 								 "\r\n");
-				// co_await graceful_close(s);
-				// co_return;
-				s.shutdown();
+
+				co_return;
 			}
 
 			if (!std::get<0>(ret))
@@ -108,10 +87,7 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 									 "Connection: close\r\n"
 									 "\r\n");
 
-					// co_await graceful_close(s);
-					// co_return;
-					s.shutdown();
-					break;
+					co_return;
 				}
 
 				if (session.completed())
@@ -125,10 +101,7 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 					if (conn_header == "close" || (req.version == "HTTP/1.0" &&
 												   conn_header != "keep-alive"))
 					{
-						// co_await graceful_close(s);
-						// co_return;
-						s.shutdown();
-						break;
+						co_return;
 					}
 
 					session.clear();

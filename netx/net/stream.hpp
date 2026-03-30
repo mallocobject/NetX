@@ -27,6 +27,7 @@ class Stream
   public:
 	explicit Stream(int fd) : read_fd_(fd), write_fd_(dup(fd))
 	{
+		assert(read_fd_ != -1 && write_fd_ != -1);
 		// Socket::getSockname(read_fd_, &sock_addr_);
 		Socket::setNonBlocking(read_fd_);
 		Socket::setNonBlocking(write_fd_);
@@ -35,6 +36,7 @@ class Stream
 	explicit Stream(int read_fd, int write_fd)
 		: read_fd_(read_fd), write_fd_(write_fd)
 	{
+		assert(read_fd_ != -1 && write_fd_ != -1);
 		// Socket::getSockname(read_fd_, &sock_addr_);
 		Socket::setNonBlocking(read_fd_);
 		Socket::setNonBlocking(write_fd_);
