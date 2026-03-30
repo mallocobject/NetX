@@ -61,8 +61,13 @@ struct EpollPoller
 		std::vector<epoll_event> evs(registered_event_count_);
 		int nevs = checkErrorNonBlock<EINTR>(
 			epoll_wait(epfd_, evs.data(), registered_event_count_, timeout));
+		if (nevs <= 0)
+		{
+			return {};
+		}
 
 		std::vector<Event> result;
+		result.reserve(nevs);
 		for (int i = 0; i < nevs; i++)
 		{
 			auto handle_info = reinterpret_cast<HandleInfo*>(evs[i].data.ptr);
