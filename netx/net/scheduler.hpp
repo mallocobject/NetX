@@ -45,10 +45,6 @@ class Scheduler
 			elog::LOG_TRACE("scheduler receives tasks, its address is {}",
 							static_cast<void*>(this));
 			async::Task<> tmp(nullptr);
-			// while (task_queue_.pop(tmp))
-			// {
-			// 	sts_.emplace_back(std::move(tmp));
-			// }
 
 			while (task_queue_.pop(tmp))
 			{
@@ -57,28 +53,7 @@ class Scheduler
 
 				*it = async::ScheduledTask<async::Task<>>(std::move(tmp), &sts_,
 														  it);
-
-				// async::co_spawn([st = std::move(*it)]() -> async::Task<>
-				// 				{ co_await st; });
 			}
-
-			// // FIXME
-			// if (sts_.size() < 100) [[likely]]
-			// {
-			// 	continue;
-			// }
-			// for (auto iter = sts_.begin(); iter != sts_.end();)
-			// {
-			// 	if (iter->done())
-			// 	{
-			// 		iter->result(); //< consume result, such as throw exception
-			// 		iter = sts_.erase(iter);
-			// 	}
-			// 	else
-			// 	{
-			// 		++iter;
-			// 	}
-			// }
 		}
 	}
 

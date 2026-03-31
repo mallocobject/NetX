@@ -50,11 +50,19 @@ template <typename Key, typename Value> struct OrderedMap
 
 	Value& operator[](const Key& k)
 	{
+		if (data_.find(k) == data_.end())
+		{
+			order_.push_back(k);
+		}
 		return data_[k];
 	}
 
 	Value& operator[](Key&& k)
 	{
+		if (data_.find(k) == data_.end())
+		{
+			order_.push_back(k);
+		}
 		return data_[std::move(k)];
 	}
 

@@ -1,7 +1,6 @@
 #ifndef NETX_RPC_DISPATCHER_HPP
 #define NETX_RPC_DISPATCHER_HPP
 
-#include "netx/meta/function_traits.hpp"
 #include "netx/net/buffer.hpp"
 #include "netx/rpc/serialize_traits.hpp"
 #include <cstdint>
@@ -16,7 +15,27 @@ namespace netx
 namespace rpc
 {
 namespace net = netx::net;
-namespace meta = netx::meta;
+
+template <typename T> struct FunctionTraits;
+
+template <typename R, typename... Args> struct FunctionTraits<R (*)(Args...)>
+{
+	using RetType = R;
+	using ArgsTuple = std::tuple<std::remove_cvref_t<Args>...>;
+};
+
+template <typename C, typename R, typename... Args>
+struct FunctionTraits<R (C::*)(Args...) const>
+{
+	using RetType = R;
+	using ArgsTuple = std::tuple<std::remove_cvref_t<Args>...>;
+};
+
+template <typename F>
+struct FunctionTraits : FunctionTraits<decltype(&F::operator())>
+{
+};
+
 class RpcDispatcher
 {
   public:
@@ -47,8 +66,8 @@ template <typename Func>
 void RpcDispatcher::bind(const std::string& method_name, Func&& func)
 {
 	using FunctionTraits =
-		meta::FunctionTraits<std::decay_t<Func>>; // void(int) -> void(*)(int)
-												  // no void(&)(int)
+		FunctionTraits<std::decay_t<Func>>; // void(int) -> void(*)(int)
+											// no void(&)(int)
 	using ArgsTuple = typename FunctionTraits::ArgsTuple;
 	using RetType = typename FunctionTraits::RetType;
 

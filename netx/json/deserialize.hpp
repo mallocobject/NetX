@@ -2,55 +2,22 @@
 #define NETX_JSON_DESERIALIZE_HPP
 
 #include "netx/json/ctre.hpp"
-#include "netx/meta/ordered_map.hpp"
+#include "netx/json/object.hpp"
 #include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <ios>
-#include <iostream>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
-#include <vector>
 namespace netx
 {
 namespace json
 {
-
-namespace meta = netx::meta;
-
-struct Object;
-
-using Dict = meta::OrderedMap<std::string, Object>;
-using List = std::vector<Object>;
-
-struct Object
-{
-	std::variant<std::nullptr_t, bool, std::int64_t, double, std::string, List,
-				 Dict>
-		inner;
-
-	template <typename T> bool is() const
-	{
-		return std::holds_alternative<T>(inner);
-	}
-
-	template <typename T> const T& get() const
-	{
-		return std::get<T>(inner);
-	}
-
-	template <typename T> T& get()
-	{
-		return std::get<T>(inner);
-	}
-};
 
 template <typename T> std::optional<T> try_parse_num(std::string_view str)
 {
@@ -100,7 +67,7 @@ inline std::pair<Object, std::size_t> parse(std::string_view json)
 {
 	if (json.empty())
 	{
-		return {Object{std::nullptr_t{}}, 0};
+		return {Object{Null{}}, 0};
 	}
 	else if (std::size_t offset = json.find_first_not_of(" \n\r\0\t\v\f\b\a");
 			 offset != 0 && offset != std::string_view::npos)
@@ -110,7 +77,7 @@ inline std::pair<Object, std::size_t> parse(std::string_view json)
 	}
 	else if (json.substr(0, 4) == "null")
 	{
-		return {Object{std::nullptr_t{}}, 4};
+		return {Object{Null{}}, 4};
 	}
 	else if (json.substr(0, 4) == "true")
 	{
@@ -128,11 +95,11 @@ inline std::pair<Object, std::size_t> parse(std::string_view json)
 					json))
 		{
 			std::string_view strv(num_re.view());
-			if (auto num = try_parse_num<std::int64_t>(strv))
+			if (auto num = try_parse_num<Integer>(strv))
 			{
 				return {Object{num.value()}, strv.size()};
 			}
-			if (auto num = try_parse_num<double>(strv))
+			if (auto num = try_parse_num<Float>(strv))
 			{
 				return {Object{num.value()}, strv.size()};
 			}
@@ -227,12 +194,12 @@ inline std::pair<Object, std::size_t> parse(std::string_view json)
 				break;
 			}
 			idx += key_eaten;
-			if (!std::holds_alternative<std::string>(keyobj.inner))
+			if (!std::holds_alternative<String>(keyobj.inner))
 			{
 				idx = 0;
 				break;
 			}
-			std::string key = std::move(std::get<std::string>(keyobj.inner));
+			std::string key = std::move(std::get<String>(keyobj.inner));
 
 			if (json[idx] == ':')
 			{
@@ -263,59 +230,9 @@ inline std::pair<Object, std::size_t> parse(std::string_view json)
 		return {Object{res}, idx};
 	}
 
-	return {Object{std::nullptr_t{}}, 0};
+	return {Object{Null{}}, 0};
 }
 
-template <class... Fs> struct overloaded : public Fs...
-{
-	using Fs::operator()...;
-};
-
-template <typename... Funcs> overloaded(Funcs...) -> overloaded<Funcs...>;
-
-inline void dump_json(const Object& obj)
-{
-	std::visit(overloaded{[&](std::nullptr_t val) { std::cout << "null"; },
-						  [&](bool val) { std::cout << std::boolalpha << val; },
-						  [&](std::int64_t val) { std::cout << val; },
-						  [&](double val) { std::cout << val; },
-						  [&](const std::string& val)
-						  { std::cout << '"' << val << '"'; },
-						  [&](const List& val)
-						  {
-							  std::cout << '[';
-							  if (!val.empty())
-							  {
-								  auto it = val.begin();
-								  dump_json(*it);
-								  for (++it; it != val.end(); ++it)
-								  {
-									  std::cout << ", ";
-									  dump_json(*it);
-								  }
-							  }
-							  std::cout << ']';
-						  },
-						  [&](const Dict& val)
-						  {
-							  std::cout << '{';
-							  if (!val.empty())
-							  {
-								  auto it = val.begin();
-								  std::cout << '"' << it.first() << '"' << ": ";
-								  dump_json(it.second());
-								  for (++it; it != val.end(); ++it)
-								  {
-									  std::cout << ", " << '"' << it.first()
-												<< '"' << ": ";
-									  dump_json(it.second());
-								  }
-							  }
-							  std::cout << '}';
-						  }} // namespace json
-			   ,
-			   obj.inner);
-} // namespace netx
 } // namespace json
 } // namespace netx
 

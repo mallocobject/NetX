@@ -1,10 +1,10 @@
 #ifndef NETX_NET_INET_ADDR_HPP
 #define NETX_NET_INET_ADDR_HPP
 
-#include "elog/logger.hpp"
 #include "netx/async/check_error.hpp"
 #include <arpa/inet.h>
 #include <cstdint>
+#include <format>
 #include <netinet/in.h>
 #include <string>
 #include <strings.h>

@@ -2,7 +2,6 @@
 #define NETX_RPC_SERIALIZE_TRAITS_HPP
 
 #include "netx/meta/endian_helper.hpp"
-#include "netx/meta/reflection.hpp"
 #include "netx/net/buffer.hpp"
 #include <cassert>
 #include <cstddef>
@@ -13,8 +12,115 @@ namespace netx
 {
 namespace rpc
 {
-namespace meta = netx::meta;
 namespace net = netx::net;
+
+struct AnyType
+{
+	template <typename Type> constexpr operator Type() const noexcept;
+};
+
+template <typename T, typename... Args>
+concept AggregateInit = requires { T{Args{}...}; };
+
+template <typename T> constexpr std::size_t count_fields()
+{
+	if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType, AnyType,
+								AnyType, AnyType, AnyType, AnyType, AnyType>)
+		return 10;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType,
+									 AnyType, AnyType, AnyType, AnyType,
+									 AnyType>)
+		return 9;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType,
+									 AnyType, AnyType, AnyType, AnyType>)
+		return 8;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType,
+									 AnyType, AnyType, AnyType>)
+		return 7;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType,
+									 AnyType, AnyType>)
+		return 6;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType,
+									 AnyType>)
+		return 5;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType, AnyType>)
+		return 4;
+	else if constexpr (AggregateInit<T, AnyType, AnyType, AnyType>)
+		return 3;
+	else if constexpr (AggregateInit<T, AnyType, AnyType>)
+		return 2;
+	else if constexpr (AggregateInit<T, AnyType>)
+		return 1;
+	else
+		return 0;
+}
+
+template <typename T> constexpr auto struct_to_tuple(T& obj)
+{
+	using CleanT = std::remove_cvref_t<T>;
+	constexpr std::size_t N = count_fields<CleanT>();
+
+	if constexpr (N == 10)
+	{
+		auto& [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9] = obj;
+		return std::tie(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9);
+	}
+	else if constexpr (N == 9)
+	{
+		auto& [a0, a1, a2, a3, a4, a5, a6, a7, a8] = obj;
+		return std::tie(a0, a1, a2, a3, a4, a5, a6, a7, a8);
+	}
+	else if constexpr (N == 8)
+	{
+		auto& [a0, a1, a2, a3, a4, a5, a6, a7] = obj;
+		return std::tie(a0, a1, a2, a3, a4, a5, a6, a7);
+	}
+	else if constexpr (N == 7)
+	{
+		auto& [a0, a1, a2, a3, a4, a5, a6] = obj;
+		return std::tie(a0, a1, a2, a3, a4, a5, a6);
+	}
+	else if constexpr (N == 6)
+	{
+		auto& [a0, a1, a2, a3, a4, a5] = obj;
+		return std::tie(a0, a1, a2, a3, a4, a5);
+	}
+	else if constexpr (N == 5)
+	{
+		auto& [a0, a1, a2, a3, a4] = obj;
+		return std::tie(a0, a1, a2, a3, a4);
+	}
+	else if constexpr (N == 4)
+	{
+		auto& [a0, a1, a2, a3] = obj;
+		return std::tie(a0, a1, a2, a3);
+	}
+	else if constexpr (N == 3)
+	{
+		auto& [a0, a1, a2] = obj;
+		return std::tie(a0, a1, a2);
+	}
+	else if constexpr (N == 2)
+	{
+		auto& [a0, a1] = obj;
+		return std::tie(a0, a1);
+	}
+	else if constexpr (N == 1)
+	{
+		auto& [a0] = obj;
+		return std::tie(a0);
+	}
+	else
+	{
+		return std::tie();
+	}
+}
+
+template <typename T>
+constexpr bool is_custom_struct_v =
+	std::is_aggregate_v<T> && !std::is_arithmetic_v<T> &&
+	!std::is_same_v<T, std::string>;
+
 template <typename T> struct is_tuple_type : std::false_type
 {
 };
@@ -69,7 +175,7 @@ template <> struct WireTypeTraits<std::string>
 };
 
 template <typename T>
-struct WireTypeTraits<T, std::enable_if_t<meta::is_custom_struct_v<T>>>
+struct WireTypeTraits<T, std::enable_if_t<is_custom_struct_v<T>>>
 {
 	static constexpr WireType value = WireType::kLengthDelim;
 };
@@ -192,7 +298,7 @@ void serialize_tuple_tlv_impl(net::Buffer* buf, const Tuple& t,
 
 			 if constexpr (wt == WireType::kLengthDelim)
 			 {
-				 if constexpr (meta::is_custom_struct_v<FieldType> ||
+				 if constexpr (is_custom_struct_v<FieldType> ||
 							   is_tuple_type_v<FieldType>)
 				 {
 					 std::size_t size_before = buf->readableBytes();
@@ -261,7 +367,7 @@ void deserialize_tuple_tlv_impl(net::Buffer* buf, Tuple* t,
 						if constexpr (WireTypeTraits<FieldType>::value ==
 									  WireType::kLengthDelim)
 						{
-							if constexpr (meta::is_custom_struct_v<FieldType> ||
+							if constexpr (is_custom_struct_v<FieldType> ||
 										  is_tuple_type_v<FieldType>)
 							{
 								std::uint32_t len;
@@ -318,21 +424,21 @@ template <typename... Args> struct DeserializeTraits<std::tuple<Args...>>
 };
 
 template <typename T>
-struct SerializeTraits<T, std::enable_if_t<meta::is_custom_struct_v<T>>>
+struct SerializeTraits<T, std::enable_if_t<is_custom_struct_v<T>>>
 {
 	static void serialize(net::Buffer* buf, const T& val)
 	{
-		auto t = meta::struct_to_tuple(const_cast<T&>(val));
+		auto t = struct_to_tuple(const_cast<T&>(val));
 		SerializeTraits<decltype(t)>::serialize(buf, t);
 	}
 };
 
 template <typename T>
-struct DeserializeTraits<T, std::enable_if_t<meta::is_custom_struct_v<T>>>
+struct DeserializeTraits<T, std::enable_if_t<is_custom_struct_v<T>>>
 {
 	static void deserialize(net::Buffer* buf, T* val, std::uint32_t limit = 0)
 	{
-		auto t = meta::struct_to_tuple(*val);
+		auto t = struct_to_tuple(*val);
 		DeserializeTraits<decltype(t)>::deserialize(buf, &t, limit);
 	}
 };
