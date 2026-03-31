@@ -1,7 +1,7 @@
 #ifndef NETX_RPC_RPC_HEADER_HPP
 #define NETX_RPC_RPC_HEADER_HPP
 
-#include "netx/meta/buffer_endian_helper.hpp"
+#include "netx/meta/endian_helper.hpp"
 #include <cstdint>
 #include <netinet/in.h>
 #include <ostream>

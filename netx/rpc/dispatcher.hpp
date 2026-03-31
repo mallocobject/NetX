@@ -52,25 +52,26 @@ void RpcDispatcher::bind(const std::string& method_name, Func&& func)
 	using ArgsTuple = typename FunctionTraits::ArgsTuple;
 	using RetType = typename FunctionTraits::RetType;
 
-	handlers_[method_name] =
+	handlers_.try_emplace(
+		method_name,
 		[func = std::forward<Func>(func)](net::Buffer* req, net::Buffer* res,
 										  std::uint32_t limit)
-	{
-		ArgsTuple args;
-		DeserializeTraits<ArgsTuple>::deserialize(req, &args, limit);
+		{
+			ArgsTuple args;
+			DeserializeTraits<ArgsTuple>::deserialize(req, &args, limit);
 
-		if constexpr (std::is_void_v<RetType>)
-		{
-			std::apply(func, args);
-		}
-		else
-		{
-			RetType result = std::apply(func, args);
-			using RetTuple = std::tuple<RetType>;
-			RetTuple ret{result};
-			SerializeTraits<RetTuple>::serialize(res, ret);
-		}
-	};
+			if constexpr (std::is_void_v<RetType>)
+			{
+				std::apply(func, args);
+			}
+			else
+			{
+				RetType result = std::apply(func, args);
+				using RetTuple = std::tuple<RetType>;
+				RetTuple ret{result};
+				SerializeTraits<RetTuple>::serialize(res, ret);
+			}
+		});
 }
 } // namespace rpc
 } // namespace netx

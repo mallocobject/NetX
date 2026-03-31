@@ -156,7 +156,7 @@ async::Task<Ret> RpcClient::call(const std::string& method_name, Args&&... args)
 	}
 
 	CallContext ctx;
-	pending_calls_[req_id] = &ctx;
+	pending_calls_.try_emplace(req_id, &ctx);
 
 	co_await RpcAwaiter{ctx};
 
@@ -202,8 +202,8 @@ inline async::Task<> RpcClient::readLoop()
 			payload.append(stream_.read_buffer()->peek(), h.body_len);
 			stream_.read_buffer()->retrieve(h.body_len); // retrieve body
 
-			auto it = pending_calls_.find(h.request_id);
-			if (it != pending_calls_.end())
+			if (auto it = pending_calls_.find(h.request_id);
+				it != pending_calls_.end())
 			{
 				CallContext* ctx = it->second;
 				ctx->response_buffer = std::move(payload);

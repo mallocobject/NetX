@@ -1,5 +1,5 @@
-#ifndef NETX_META_BUFFER_ENDIAN_HELPER_HPP
-#define NETX_META_BUFFER_ENDIAN_HELPER_HPP
+#ifndef NETX_META_ENDIAN_HELPER_HPP
+#define NETX_META_ENDIAN_HELPER_HPP
 
 #include <cstdint>
 #include <cstring>

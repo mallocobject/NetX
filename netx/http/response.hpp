@@ -22,7 +22,7 @@ struct HttpResponse
 
 	HttpResponse& header(const std::string& key, const std::string& value)
 	{
-		header_params_[key] = value;
+		header_params_.try_emplace(key, value);
 
 		return *this;
 	}

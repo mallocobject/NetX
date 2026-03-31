@@ -1,7 +1,7 @@
 #ifndef NETX_RPC_SERIALIZE_TRAITS_HPP
 #define NETX_RPC_SERIALIZE_TRAITS_HPP
 
-#include "netx/meta/buffer_endian_helper.hpp"
+#include "netx/meta/endian_helper.hpp"
 #include "netx/meta/reflection.hpp"
 #include "netx/net/buffer.hpp"
 #include <cassert>

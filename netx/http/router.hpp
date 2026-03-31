@@ -89,7 +89,7 @@ inline void HttpRouter::RadixTree::insert(const std::string& path,
 
 		if (cur->next.find(s) == cur->next.end())
 		{
-			cur->next[s] = std::make_unique<RadixNode>();
+			cur->next.try_emplace(s, std::make_unique<RadixNode>());
 		}
 
 		cur = cur->next[s].get();
@@ -116,7 +116,7 @@ inline HttpHandler HttpRouter::RadixTree::search(const std::string& path)
 			break; // error
 		}
 
-		if (cur->next.find(s) == cur->next.end())
+		if (!cur->next.contains(s))
 		{
 			return nullptr; // router not exist
 		}

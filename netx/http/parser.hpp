@@ -273,8 +273,8 @@ inline bool HttpParser::consume(char c)
 		if (c == '\n')
 		{
 			// 检查是否有 Content-Length 决定是否需要解析 Body
-			auto it = req_.header_params.find("content-length");
-			if (it != req_.header_params.end())
+			if (auto it = req_.header_params.find("content-length");
+				it != req_.header_params.end())
 			{
 				body_remaining_ = std::stol(it->second);
 				req_.body.reserve(body_remaining_);

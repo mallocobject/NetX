@@ -7,7 +7,6 @@
 #include "netx/async/task.hpp"
 #include <cstddef>
 #include <exception>
-#include <span>
 namespace netx
 {
 namespace async
@@ -17,7 +16,6 @@ struct WhenAllCtrlBlock
 	std::size_t count;
 	CoroHandle* waiter{nullptr};
 	std::exception_ptr exception{nullptr};
-	std::span<const Task<>> tasks;
 
 	explicit WhenAllCtrlBlock(std::size_t count) : count(count)
 	{
@@ -37,11 +35,6 @@ struct WhenAllCtrlBlock
 			exception = ep;
 		}
 
-		for (const auto& t : tasks)
-		{
-			t.coro_.promise().cancel();
-		}
-
 		auto* w = waiter;
 		waiter = nullptr;
 		if (w)
@@ -55,7 +48,7 @@ struct WhenAllCtrlBlock
 struct WhenAllAwaiter
 {
 	WhenAllCtrlBlock& ctrl;
-	// std::span<const Task<>> tasks;
+	std::span<const Task<>> tasks;
 
 	bool await_ready() const noexcept
 	{
@@ -67,7 +60,7 @@ struct WhenAllAwaiter
 	{
 		coro.promise().setState(Handle::State::kSuspend);
 		ctrl.waiter = &coro.promise();
-		for (auto const& t : ctrl.tasks)
+		for (auto const& t : tasks)
 		{
 			t.coro_.promise().schedule();
 		}
@@ -113,9 +106,8 @@ Task<std::tuple<typename AwaitableTraits<Ts>::NonVoidRetType...>> whenAllImpl(
 
 	std::tuple<Result<typename AwaitableTraits<Ts>::RetType>...> results;
 	Task<> helpers[]{whenAllHelper(ts, ctrl, std::get<Is>(results))...};
-	ctrl.tasks = helpers;
 
-	co_await WhenAllAwaiter{ctrl};
+	co_await WhenAllAwaiter{ctrl, helpers};
 	co_return std::tuple<typename AwaitableTraits<Ts>::NonVoidRetType...>{
 		std::get<Is>(results).result()...};
 }
