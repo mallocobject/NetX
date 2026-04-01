@@ -50,7 +50,7 @@ template <typename Key, typename Value> struct OrderedMap
 
 	Value& operator[](const Key& k)
 	{
-		if (data_.find(k) == data_.end())
+		if (!data_.contains(k))
 		{
 			order_.push_back(k);
 		}
@@ -59,7 +59,7 @@ template <typename Key, typename Value> struct OrderedMap
 
 	Value& operator[](Key&& k)
 	{
-		if (data_.find(k) == data_.end())
+		if (!data_.contains(k))
 		{
 			order_.push_back(k);
 		}

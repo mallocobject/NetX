@@ -92,10 +92,7 @@ class Stream
 		if (write_fd_ > 0)
 		{
 			Socket::shutdown(write_fd_);
-		}
-		if (read_fd_ > 0)
-		{
-			Socket::shutdown(read_fd_);
+			Socket::close(write_fd_);
 		}
 		write_fd_ = -1;
 	}

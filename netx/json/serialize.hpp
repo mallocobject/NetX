@@ -2,6 +2,7 @@
 #define NETX_JSON_SERIALIZE_HPP
 
 #include "netx/json/object.hpp"
+#include <concepts>
 #include <string>
 #include <type_traits>
 namespace netx
@@ -223,7 +224,7 @@ inline Object to_json_object(const String& v)
 
 template <typename T>
 	requires(std::is_integral_v<T> &&
-			 !std::is_same_v<std::remove_cvref_t<T>, bool>)
+			 !std::same_as<std::remove_cvref_t<T>, bool>)
 inline Object to_json_object(T v)
 {
 	return to_object(static_cast<Integer>(v));

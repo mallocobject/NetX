@@ -51,11 +51,12 @@ struct EventLoop
 
 	void cancel_handle(Handle& handle)
 	{
-		if (handle.state() == Handle::State::kScheduled)
+		auto state = handle.state();
+		if (state == Handle::State::kScheduled ||
+			state == Handle::State::kSuspend)
 		{
 			cancelled_.insert(handle.handleId());
 		}
-
 		handle.setState(Handle::State::kCancelled);
 	}
 
@@ -177,11 +178,11 @@ inline void EventLoop::cleanupDelayedCall()
 {
 	while (!schedule_.empty())
 	{
-		auto&& [when, handle_info] = *schedule_.begin();
-		if (auto it = cancelled_.find(handle_info.id); it != cancelled_.end())
+		auto& [when, info] = *schedule_.begin();
+		if (auto it = cancelled_.find(info.id); it != cancelled_.end())
 		{
-			schedule_.erase(schedule_.begin());
 			cancelled_.erase(it);
+			schedule_.erase(schedule_.begin());
 		}
 		else
 		{
@@ -220,7 +221,14 @@ inline void EventLoop::runOnce()
 		{
 			break;
 		}
-		ready_.push(std::move(info));
+		if (auto it = cancelled_.find(info.id); it != cancelled_.end())
+		{
+			cancelled_.erase(it);
+		}
+		else
+		{
+			ready_.push(std::move(info));
+		}
 		schedule_.erase(schedule_.begin());
 	}
 
@@ -234,13 +242,10 @@ inline void EventLoop::runOnce()
 			continue;
 		}
 
-		if (info.handle->state() != Handle::State::kCancelled)
-		{
-			info.handle->setState(
-				Handle::State::kUnScheduled); // 先设置状态，再
-											  // run，防止覆盖后续状态
-			info.handle->run();
-		}
+		info.handle->setState(
+			Handle::State::kUnScheduled); // 先设置状态，再
+										  // run，防止覆盖后续状态
+		info.handle->run();
 	}
 
 	cleanupDelayedCall();
