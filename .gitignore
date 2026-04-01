@@ -3,3 +3,4 @@ build
 corpc
 py
 .vscode
+.claude
