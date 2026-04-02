@@ -19,9 +19,7 @@ struct Handle
 		kCancelled,
 	};
 
-	Handle() noexcept
-		: handle_id_(
-			  handle_id_generation_.fetch_add(1, std::memory_order_acq_rel))
+	Handle() noexcept : handle_id_(handle_id_generation_++)
 	{
 	}
 
@@ -46,9 +44,9 @@ struct Handle
 
   private:
 	HandleId handle_id_;
-	inline static std::atomic<HandleId> handle_id_generation_{0};
+	// inline static std::atomic<HandleId> handle_id_generation_{0};
 	// inline static HandleId handle_id_generation_{0};
-	// inline static thread_local HandleId handle_id_generation_{0};
+	inline static thread_local HandleId handle_id_generation_{0};
 
   protected:
 	State state_{Handle::State::kUnScheduled};
