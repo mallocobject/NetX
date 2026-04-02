@@ -52,35 +52,35 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 	{
 		while (true)
 		{
-			if (!co_await s.read())
+			// if (!co_await s.read())
+			// {
+			// 	co_return;
+			// }
+			auto ret =
+				co_await async::when_any(s.read(), async::sleep(timeout_));
+
+			if (s.write_fd() == -1)
 			{
 				co_return;
 			}
-			// auto ret =
-			// 	co_await async::when_any(s.read(), async::sleep(timeout_));
 
-			// if (s.write_fd() == -1)
-			// {
-			// 	co_return;
-			// }
+			if (ret.index() == 1)
+			{
 
-			// if (ret.index() == 1)
-			// {
+				elog::LOG_WARN("Connection timeout on fd: {}", read_fd);
+				co_await s.write("HTTP/1.1 408 Request Timeout\r\n"
+								 "Content-Length: 0\r\n"
+								 "Connection: close\r\n"
+								 "\r\n");
 
-			// 	elog::LOG_WARN("Connection timeout on fd: {}", read_fd);
-			// 	co_await s.write("HTTP/1.1 408 Request Timeout\r\n"
-			// 					 "Content-Length: 0\r\n"
-			// 					 "Connection: close\r\n"
-			// 					 "\r\n");
+				s.shutdown();
+				co_return;
+			}
 
-			// 	s.shutdown();
-			// 	co_return;
-			// }
-
-			// if (!std::get<0>(ret))
-			// {
-			// 	co_return;
-			// }
+			if (!std::get<0>(ret))
+			{
+				co_return;
+			}
 
 			while (s.read_buffer()->readableBytes() > 0)
 			{

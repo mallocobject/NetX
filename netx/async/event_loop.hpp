@@ -11,6 +11,7 @@
 #include <optional>
 #include <queue>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 namespace netx
@@ -40,7 +41,11 @@ struct EventLoop
 			return;
 		}
 		handle.setState(Handle::State::kScheduled);
-		schedule_.emplace(time_point, HandleInfo{handle.handleId(), &handle});
+
+		auto id = handle.handleId();
+		TimerEntry time_entry = {time_point, HandleInfo{id, &handle}};
+		schedule_query_[id] = time_entry;
+		schedule_.insert(std::move(time_entry));
 	}
 
 	template <typename Rep, typename Period>
@@ -52,10 +57,18 @@ struct EventLoop
 	void cancel_handle(Handle& handle)
 	{
 		auto state = handle.state();
-		if (state == Handle::State::kScheduled ||
-			state == Handle::State::kSuspend)
+		if (state == Handle::State::kScheduled)
 		{
-			cancelled_.insert(handle.handleId());
+			auto id = handle.handleId();
+			if (auto it = schedule_query_.find(id); it != schedule_query_.end())
+			{
+				schedule_.erase(it->second);
+				schedule_query_.erase(it);
+			}
+			else
+			{
+				cancelled_.insert(id);
+			}
 		}
 		handle.setState(Handle::State::kCancelled);
 	}
@@ -162,8 +175,6 @@ struct EventLoop
 		return poller.stopped() && ready_.empty() && schedule_.empty();
 	}
 
-	void cleanupDelayedCall();
-
 	void runOnce();
 
   private:
@@ -171,25 +182,9 @@ struct EventLoop
 	std::queue<HandleInfo> ready_;
 	using TimerEntry = std::pair<TimePoint, HandleInfo>;
 	std::set<TimerEntry> schedule_;
+	std::unordered_map<HandleId, TimerEntry> schedule_query_;
 	std::unordered_set<HandleId> cancelled_;
 };
-
-inline void EventLoop::cleanupDelayedCall()
-{
-	while (!schedule_.empty())
-	{
-		auto& [when, info] = *schedule_.begin();
-		if (auto it = cancelled_.find(info.id); it != cancelled_.end())
-		{
-			cancelled_.erase(it);
-			schedule_.erase(schedule_.begin());
-		}
-		else
-		{
-			break;
-		}
-	}
-}
 
 inline void EventLoop::runOnce()
 {
@@ -221,14 +216,9 @@ inline void EventLoop::runOnce()
 		{
 			break;
 		}
-		if (auto it = cancelled_.find(info.id); it != cancelled_.end())
-		{
-			cancelled_.erase(it);
-		}
-		else
-		{
-			ready_.push(std::move(info));
-		}
+
+		ready_.push(std::move(info));
+
 		schedule_.erase(schedule_.begin());
 	}
 
@@ -247,8 +237,6 @@ inline void EventLoop::runOnce()
 										  // run，防止覆盖后续状态
 		info.handle->run();
 	}
-
-	cleanupDelayedCall();
 }
 } // namespace async
 } // namespace netx
