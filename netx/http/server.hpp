@@ -67,7 +67,7 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 			if (ret.index() == 1)
 			{
 
-				elog::LOG_WARN("Connection timeout on fd: {}", read_fd);
+				// elog::LOG_WARN("Connection timeout on fd: {}", read_fd);
 				co_await s.write("HTTP/1.1 408 Request Timeout\r\n"
 								 "Content-Length: 0\r\n"
 								 "Connection: close\r\n"

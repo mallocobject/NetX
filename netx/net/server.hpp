@@ -92,7 +92,7 @@ template <typename Derived> class Server
 		}
 		start_latch.wait();
 
-		::elog::LOG_WARN("Netx-Server listening on {}",
+		::elog::LOG_WARN("NetX-Server listening on {}",
 						 stream_.sock_addr().to_formatted_string());
 
 		async_main(serverLoop());

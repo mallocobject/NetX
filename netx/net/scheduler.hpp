@@ -42,8 +42,8 @@ class Scheduler
 		{
 			co_await wakeup_awaiter_;
 			shallow();
-			elog::LOG_TRACE("scheduler receives tasks, its address is {}",
-							static_cast<void*>(this));
+			// elog::LOG_TRACE("scheduler receives tasks, its address is {}",
+			// 				static_cast<void*>(this));
 			async::Task<> tmp(nullptr);
 
 			while (task_queue_.pop(tmp))
