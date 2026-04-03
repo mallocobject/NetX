@@ -11,7 +11,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
-#include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <unistd.h>
 #include <utility>
@@ -22,9 +22,9 @@ namespace net
 namespace async = netx::async;
 class Stream
 {
+  public:
 	inline static constexpr std::size_t kChunkSize = 4 * 1024;
 
-  public:
 	explicit Stream(int fd) : read_fd_(fd), write_fd_(dup(fd))
 	{
 		assert(read_fd_ != -1 && write_fd_ != -1);
@@ -99,7 +99,7 @@ class Stream
 
 	async::Task<bool> read();
 
-	async::Task<bool> write(const std::string& str = std::string());
+	async::Task<bool> write(std::string_view str);
 
 	const InetAddr& sock_addr() const
 	{
@@ -168,7 +168,7 @@ inline async::Task<bool> Stream::read()
 	}
 }
 
-inline async::Task<bool> Stream::write(const std::string& str)
+inline async::Task<bool> Stream::write(std::string_view str)
 {
 	write_buf_.append(str);
 	while (write_buf_.readableBytes() > 0)

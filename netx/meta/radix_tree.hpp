@@ -112,15 +112,21 @@ template <typename T> T RadixTree<T>::search(const std::string& path)
 		std::string s = get_sub_path(path, &start);
 		if (s.empty() && start == std::string::npos)
 		{
-			break; // error
+			break;
 		}
 
-		if (!cur->next.contains(s))
+		if (cur->next.contains(s))
 		{
-			return nullptr; // router not exist
+			cur = cur->next[s].get();
 		}
-
-		cur = cur->next[s].get();
+		else if (cur->next.contains("*"))
+		{
+			return cur->next["*"]->value;
+		}
+		else
+		{
+			return nullptr;
+		}
 	}
 
 	return cur->value;
