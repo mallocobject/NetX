@@ -1,6 +1,7 @@
 #ifndef NETX_HTTP_ROUTER_HPP
 #define NETX_HTTP_ROUTER_HPP
 
+#include "elog/logger.hpp"
 #include "netx/async/task.hpp"
 #include "netx/http/request.hpp"
 #include "netx/http/response.hpp"
@@ -41,6 +42,11 @@ class HttpRouter
 	static TaskType send_file(net::Stream* stream, HttpResponse* res,
 							  const std::string& file_path);
 
+	static std::string normalize_path(const std::string& file_path)
+	{
+		return meta::RadixTree<HttpHandler>::normalize_path(file_path);
+	}
+
 	HttpRouter() = default;
 	HttpRouter(HttpRouter&&) = delete;
 	~HttpRouter() = default;
@@ -76,6 +82,9 @@ inline TaskType HttpRouter::dispatch(const HttpRequest& req, HttpResponse* res,
 inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 									  const std::string& file_path)
 {
+
+	// elog::LOG_FATAL("{}", file_path);
+
 	struct stat st;
 	if (::stat(file_path.c_str(), &st) == 0 && S_ISREG(st.st_mode))
 	{

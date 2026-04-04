@@ -3,8 +3,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <deque>
 #include <memory>
-#include <stack>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -23,6 +23,7 @@ template <typename T> struct RadixTree
 	void insert(const std::string& path, const T& val);
 	void insert(const std::string& path, T&& val);
 	T search(const std::string& path);
+	static std::string normalize_path(const std::string& path);
 
 	RadixTree() : root(std::make_unique<RadixNode>())
 	{
@@ -32,8 +33,8 @@ template <typename T> struct RadixTree
 	~RadixTree() = default;
 
   private:
-	std::string get_sub_path(const std::string& path, std::size_t* start);
-	std::string normalize_path(const std::string& path);
+	static std::string get_sub_path(const std::string& path,
+									std::size_t* start);
 
   private:
 	std::unique_ptr<RadixNode> root;
@@ -108,14 +109,12 @@ template <typename T> T RadixTree<T>::search(const std::string& path)
 		return root->value;
 	}
 
-	std::string normalized_path = normalize_path(path);
-
-	size_t start = (normalized_path[0] == '/') ? 1 : 0;
+	size_t start = (path[0] == '/') ? 1 : 0;
 	RadixNode* cur = root.get();
 
 	while (true)
 	{
-		std::string s = get_sub_path(normalized_path, &start);
+		std::string s = get_sub_path(path, &start);
 		if (s.empty() && start == std::string::npos)
 		{
 			break;
@@ -165,7 +164,7 @@ std::string RadixTree<T>::get_sub_path(const std::string& path,
 template <typename T>
 std::string RadixTree<T>::normalize_path(const std::string& path)
 {
-	std::stack<std::string> stk;
+	std::deque<std::string> stk;
 	std::size_t start = 0;
 	for (std::size_t i = 0; i <= path.size(); i++)
 	{
@@ -185,12 +184,12 @@ std::string RadixTree<T>::normalize_path(const std::string& path)
 			{
 				if (!stk.empty())
 				{
-					stk.pop();
+					stk.pop_back();
 				}
 			}
 			else
 			{
-				stk.push(std::move(seg));
+				stk.push_back(std::move(seg));
 			}
 			start = i + 1;
 		}
@@ -200,10 +199,10 @@ std::string RadixTree<T>::normalize_path(const std::string& path)
 	res.reserve(path.size() + 8);
 	while (!stk.empty())
 	{
-		res += stk.top() + '/';
-		stk.pop();
+		res += '/' + stk.front();
+		stk.pop_front();
 	}
-	return res.empty() ? "/" : (std::reverse(res.begin(), res.end()), res);
+	return res.empty() ? "/" : res;
 }
 } // namespace meta
 } // namespace netx
