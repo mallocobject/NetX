@@ -1,17 +1,17 @@
 #ifndef NETX_HTTP_ROUTER_HPP
 #define NETX_HTTP_ROUTER_HPP
 
-#include "elog/logger.hpp"
 #include "netx/async/task.hpp"
 #include "netx/http/request.hpp"
 #include "netx/http/response.hpp"
 #include "netx/meta/radix_tree.hpp"
+#include "netx/net/socket.hpp"
 #include "netx/net/stream.hpp"
 #include <cassert>
 #include <fcntl.h>
-#include <fstream>
 #include <functional>
 #include <string>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unordered_map>
 #include <utility>
@@ -79,9 +79,31 @@ inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 	struct stat st;
 	if (::stat(file_path.c_str(), &st) == 0 && S_ISREG(st.st_mode))
 	{
-		std::ifstream file(file_path, std::ios::binary);
-		if (!file.is_open())
+		int fd = ::open(file_path.c_str(), O_RDONLY);
+		if (fd == -1)
 		{
+			res->status(500)
+				.content_type("text/html")
+				.body("<h1>500 Internal Server Error</h1>");
+			co_await stream->write(res->to_formatted_string());
+			co_return;
+		}
+
+		if (::fstat(fd, &st) == -1 || !S_ISREG(st.st_mode))
+		{
+			net::Socket::close(fd);
+			res->status(500)
+				.content_type("text/html")
+				.body("<h1>500 Internal Server Error</h1>");
+			co_await stream->write(res->to_formatted_string());
+			co_return;
+		}
+
+		void* mapped =
+			::mmap(nullptr, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+		if (mapped == MAP_FAILED)
+		{
+			net::Socket::close(fd);
 			res->status(500)
 				.content_type("text/html")
 				.body("<h1>500 Internal Server Error</h1>");
@@ -94,13 +116,19 @@ inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 			.header("Content-Length", std::to_string(st.st_size));
 		co_await stream->write(res->to_formatted_string());
 
-		const size_t chunk_size = net::Stream::kChunkSize;
-		std::vector<char> buffer(chunk_size);
-		while (file.read(buffer.data(), chunk_size) || file.gcount() > 0)
+		const std::size_t chunk_size = net::Stream::kChunkSize;
+		char* ptr = static_cast<char*>(mapped);
+		std::size_t remaining = st.st_size;
+		while (remaining > 0)
 		{
-			size_t bytes = file.gcount();
-			co_await stream->write(std::string_view(buffer.data(), bytes));
+			std::size_t to_send = std::min(remaining, chunk_size);
+			co_await stream->write(std::string_view(ptr, to_send));
+			ptr += to_send;
+			remaining -= to_send;
 		}
+
+		::munmap(mapped, st.st_size);
+		net::Socket::close(fd);
 		co_return;
 	}
 	res->status(404).content_type("text/html").body("<h1>404 Not Found</h1>");

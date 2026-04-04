@@ -1,7 +1,10 @@
 #ifndef NETX_META_RADIX_TREE_HPP
 #define NETX_META_RADIX_TREE_HPP
 
+#include <algorithm>
+#include <cstddef>
 #include <memory>
+#include <stack>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -30,6 +33,7 @@ template <typename T> struct RadixTree
 
   private:
 	std::string get_sub_path(const std::string& path, std::size_t* start);
+	std::string normalize_path(const std::string& path);
 
   private:
 	std::unique_ptr<RadixNode> root;
@@ -47,7 +51,7 @@ inline void RadixTree<T>::insert(const std::string& path, const T& val)
 	std::size_t start = (path[0] == '/') ? 1 : 0;
 	RadixNode* cur = root.get();
 
-	while (start != std::string::npos)
+	while (true)
 	{
 		std::string s = get_sub_path(path, &start);
 		if (s.empty() && start == std::string::npos)
@@ -78,7 +82,7 @@ inline void RadixTree<T>::insert(const std::string& path, T&& val)
 	std::size_t start = (path[0] == '/') ? 1 : 0;
 	RadixNode* cur = root.get();
 
-	while (start != std::string::npos)
+	while (true)
 	{
 		std::string s = get_sub_path(path, &start);
 		if (s.empty() && start == std::string::npos)
@@ -104,12 +108,14 @@ template <typename T> T RadixTree<T>::search(const std::string& path)
 		return root->value;
 	}
 
-	size_t start = (path[0] == '/') ? 1 : 0;
+	std::string normalized_path = normalize_path(path);
+
+	size_t start = (normalized_path[0] == '/') ? 1 : 0;
 	RadixNode* cur = root.get();
 
-	while (start != std::string::npos)
+	while (true)
 	{
-		std::string s = get_sub_path(path, &start);
+		std::string s = get_sub_path(normalized_path, &start);
 		if (s.empty() && start == std::string::npos)
 		{
 			break;
@@ -154,6 +160,50 @@ std::string RadixTree<T>::get_sub_path(const std::string& path,
 
 	*start = std::string::npos;
 	return path.substr(begin);
+}
+
+template <typename T>
+std::string RadixTree<T>::normalize_path(const std::string& path)
+{
+	std::stack<std::string> stk;
+	std::size_t start = 0;
+	for (std::size_t i = 0; i <= path.size(); i++)
+	{
+		if (i == path.size() || path[i] == '/')
+		{
+			std::size_t seg_len = i - start;
+			if (seg_len == 0)
+			{
+				start = i + 1;
+				continue;
+			}
+			std::string seg(path.data() + start, seg_len);
+			if (seg == ".")
+			{
+			}
+			else if (seg == "..")
+			{
+				if (!stk.empty())
+				{
+					stk.pop();
+				}
+			}
+			else
+			{
+				stk.push(std::move(seg));
+			}
+			start = i + 1;
+		}
+	}
+
+	std::string res;
+	res.reserve(path.size() + 8);
+	while (!stk.empty())
+	{
+		res += stk.top() + '/';
+		stk.pop();
+	}
+	return res.empty() ? "/" : (std::reverse(res.begin(), res.end()), res);
 }
 } // namespace meta
 } // namespace netx
