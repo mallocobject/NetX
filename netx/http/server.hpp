@@ -5,6 +5,7 @@
 #include "netx/async/sleep.hpp"
 #include "netx/async/when_any.hpp"
 #include "netx/http/router.hpp"
+#include "netx/http/sender.hpp"
 #include "netx/http/session.hpp"
 #include "netx/net/server.hpp"
 #include "netx/net/stream.hpp"
@@ -52,10 +53,6 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 	{
 		while (true)
 		{
-			// if (!co_await s.read())
-			// {
-			// 	co_return;
-			// }
 			auto ret =
 				co_await async::when_any(s.read(), async::sleep(timeout_));
 
@@ -97,19 +94,25 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 
 				if (session.completed())
 				{
-					const http::HttpRequest& req = session.req();
-					http::HttpResponse res;
+					auto req = session.req();
 
-					co_await router_.dispatch(req, &res, &s);
+					http::HttpResponse res = co_await router_.dispatch(req);
 
-					std::string conn_header = req.header("connection");
-					if (conn_header == "close" || (req.version == "HTTP/1.0" &&
-												   conn_header != "keep-alive"))
+					bool is_keep = (req->header("connection") != "close");
+					if (req->version == "HTTP/1.0" &&
+						req->header("connection") != "keep-alive")
+					{
+						is_keep = false;
+					}
+					res.keep_alive(is_keep);
+
+					co_await HttpSender::send(&s, &res);
+
+					if (!is_keep)
 					{
 						s.shutdown();
 						co_return;
 					}
-
 					session.clear();
 				}
 				else

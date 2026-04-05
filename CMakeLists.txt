@@ -9,5 +9,5 @@ message(STATUS "Cmake build mode: ${CMAKE_BUILD_TYPE}")
 
 add_subdirectory(elog)
 add_subdirectory(netx)
-add_subdirectory(examples)
+add_subdirectory(test)
 

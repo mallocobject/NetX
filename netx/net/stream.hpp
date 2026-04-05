@@ -168,7 +168,7 @@ inline async::Task<bool> Stream::read()
 	}
 }
 
-inline async::Task<bool> Stream::write(std::string_view str)
+inline async::Task<bool> Stream::write(std::string_view str = "")
 {
 	write_buf_.append(str);
 	while (write_buf_.readableBytes() > 0)

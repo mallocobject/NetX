@@ -52,9 +52,9 @@ struct HttpParser
 		return state_ == State::kComplete;
 	}
 
-	const HttpRequest& req() const
+	HttpRequest* req() noexcept
 	{
-		return req_;
+		return &req_;
 	}
 
 	void clear()

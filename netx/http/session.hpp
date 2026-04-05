@@ -16,7 +16,7 @@ struct Session
 		return parser_.completed();
 	}
 
-	const HttpRequest& req() const noexcept
+	HttpRequest* req() noexcept
 	{
 		return parser_.req();
 	}

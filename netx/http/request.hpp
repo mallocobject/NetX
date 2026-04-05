@@ -16,6 +16,7 @@ struct HttpRequest
 
 	std::unordered_map<std::string, std::string> header_params;
 	std::unordered_map<std::string, std::string> query_params;
+	std::unordered_map<std::string, std::string> path_params;
 
 	std::string body;
 
@@ -33,6 +34,12 @@ struct HttpRequest
 	{
 		auto it = query_params.find(key);
 		return (it != query_params.end()) ? it->second : "";
+	}
+
+	std::string param(const std::string& key) const
+	{
+		auto it = path_params.find(key);
+		return (it != path_params.end()) ? it->second : "";
 	}
 
 	void clear()
