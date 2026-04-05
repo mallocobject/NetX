@@ -8,7 +8,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set_target_properties(netx PROPERTIES DEBUG_POSTFIX "_d")
 endif()
 
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-fcoroutines)
 endif()
+
+find_package(OpenSSL REQUIRED)
+target_link_libraries(netx INTERFACE OpenSSL::SSL OpenSSL::Crypto)

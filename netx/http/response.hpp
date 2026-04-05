@@ -26,6 +26,11 @@ struct HttpResponse
 		return *this;
 	}
 
+	int status_code() const noexcept
+	{
+		return status_code_;
+	}
+
 	HttpResponse& header(const std::string& key, const std::string& value)
 	{
 		header_params_[key] = value;
@@ -97,11 +102,6 @@ struct HttpResponse
 	{
 		return body_;
 	}
-
-	HttpResponse() = default;
-	HttpResponse(const HttpResponse&) = default;
-	HttpResponse(HttpResponse&&) = default;
-	~HttpResponse() = default;
 
   private:
 	static std::string_view code2msg(int code)

@@ -3,19 +3,24 @@
 
 #include "elog/logger.hpp"
 #include "netx/async/sleep.hpp"
+#include "netx/async/task.hpp"
 #include "netx/async/when_any.hpp"
+#include "netx/http/response.hpp"
 #include "netx/http/router.hpp"
 #include "netx/http/sender.hpp"
 #include "netx/http/session.hpp"
 #include "netx/net/server.hpp"
 #include "netx/net/stream.hpp"
+#include "netx/ws/handshake.hpp"
 #include <chrono>
+#include <utility>
 namespace netx
 {
 namespace http
 {
 namespace async = netx::async;
 namespace net = netx::net;
+namespace ws = netx::ws;
 class HttpServer : public net::Server<HttpServer>
 {
 	friend class net::Server<HttpServer>;
@@ -33,6 +38,13 @@ class HttpServer : public net::Server<HttpServer>
 					  Handler&& handler)
 	{
 		router_.route(method, path, std::forward<Handler>(handler));
+		return *this;
+	}
+
+	template <typename Handler>
+	HttpServer& ws(const std::string& path, Handler&& handler)
+	{
+		router_.route_ws(path, std::forward<Handler>(handler));
 		return *this;
 	}
 
@@ -83,7 +95,6 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 			{
 				if (!session.parse(s.read_buffer()))
 				{
-					// elog::LOG_FATAL("{}", s.write_fd());
 					co_await s.write("HTTP/1.1 400 Bad Request\r\n"
 									 "Content-Length: 0\r\n"
 									 "Connection: close\r\n"
@@ -96,7 +107,29 @@ inline async::Task<> HttpServer::handleClient(int read_fd, int write_fd)
 				{
 					auto req = session.req();
 
-					http::HttpResponse res = co_await router_.dispatch(req);
+					auto res = co_await router_.dispatch(req);
+
+					if (res.status_code() == 101)
+					{
+						std::string client_key =
+							req->header("sec-websocket-key");
+						std::string accept_key =
+							ws::WSHandshake::generate_accept_key(client_key);
+
+						res.header("Upgrade", "websocket")
+							.header("Connection", "Upgrade")
+							.header("Sec-WebSocket-Accept", accept_key);
+
+						co_await HttpSender::send(&s, &res);
+
+						auto ws_handler = router_.get_ws_handler(req->path);
+						if (ws_handler)
+						{
+							ws::WSConnection ws_conn(&s);
+							co_await ws_handler(&ws_conn); // 进入长连接处理循环
+						}
+						co_return;
+					}
 
 					bool is_keep = (req->header("connection") != "close");
 					if (req->version == "HTTP/1.0" &&

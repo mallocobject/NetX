@@ -5,6 +5,7 @@
 #include "netx/http/radix_tree.hpp"
 #include "netx/http/request.hpp"
 #include "netx/http/response.hpp"
+#include "netx/ws/connection.hpp"
 #include <cassert>
 #include <fcntl.h>
 #include <functional>
@@ -18,8 +19,10 @@ namespace netx
 namespace http
 {
 namespace async = netx::async;
+namespace ws = netx::ws;
 
 using HttpHandler = std::function<async::Task<HttpResponse>(HttpRequest*)>;
+using WSHandler = std::function<async::Task<>(ws::WSConnection*)>;
 
 class HttpRouter
 {
@@ -29,6 +32,28 @@ class HttpRouter
 			   Handler&& handler)
 	{
 		trees_[method].insert(path, std::forward<Handler>(handler));
+	}
+
+	void route_ws(const std::string& path, WSHandler handler)
+	{
+		route("GET", path,
+			  [](HttpRequest* req) -> async::Task<HttpResponse>
+			  {
+				  HttpResponse res;
+				  if (req->header("upgrade") == "websocket")
+				  {
+					  res.status(101);
+				  }
+				  co_return res;
+			  });
+
+		ws_tree_.insert(path, std::move(handler));
+	}
+
+	WSHandler get_ws_handler(const std::string& path)
+	{
+		auto match = ws_tree_.search(path);
+		return match.value ? *match.value : nullptr;
 	}
 
 	async::Task<HttpResponse> dispatch(HttpRequest* req);
@@ -42,6 +67,7 @@ class HttpRouter
 
   private:
 	std::unordered_map<std::string, RadixTree<HttpHandler>> trees_;
+	RadixTree<WSHandler> ws_tree_;
 };
 
 inline async::Task<HttpResponse> HttpRouter::dispatch(HttpRequest* req)
