@@ -92,7 +92,7 @@ inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 		if (fd == -1)
 		{
 			res->status(500)
-				.content_type("text/html")
+				.content_type("text/html; charset=utf-8")
 				.body("<h1>500 Internal Server Error</h1>");
 			co_await stream->write(res->to_formatted_string());
 			co_return;
@@ -102,7 +102,7 @@ inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 		{
 			net::Socket::close(fd);
 			res->status(500)
-				.content_type("text/html")
+				.content_type("text/html; charset=utf-8")
 				.body("<h1>500 Internal Server Error</h1>");
 			co_await stream->write(res->to_formatted_string());
 			co_return;
@@ -114,7 +114,7 @@ inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 		{
 			net::Socket::close(fd);
 			res->status(500)
-				.content_type("text/html")
+				.content_type("text/html; charset=utf-8")
 				.body("<h1>500 Internal Server Error</h1>");
 			co_await stream->write(res->to_formatted_string());
 			co_return;
@@ -140,7 +140,9 @@ inline TaskType HttpRouter::send_file(net::Stream* stream, HttpResponse* res,
 		net::Socket::close(fd);
 		co_return;
 	}
-	res->status(404).content_type("text/html").body("<h1>404 Not Found</h1>");
+	res->status(404)
+		.content_type("text/html; charset=utf-8")
+		.body("<h1>404 Not Found</h1>");
 	co_await stream->write(res->to_formatted_string());
 }
 
@@ -152,11 +154,15 @@ inline std::string HttpRouter::get_mine_type(const std::string& path)
 	}
 	else if (path.ends_with(".css"))
 	{
-		return "text/css";
+		return "text/css; charset=utf-8";
 	}
 	else if (path.ends_with(".js"))
 	{
-		return "application/javascript";
+		return "application/javascript; charset=utf-8";
+	}
+	else if (path.ends_with(".svg"))
+	{
+		return "image/svg+xml; charset=utf-8";
 	}
 	else if (path.ends_with(".png"))
 	{
