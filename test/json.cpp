@@ -39,10 +39,10 @@ int main()
     })JSON";
 
 	auto res = parse(json_str);
-	// if (res.second > 0)
-	// {
-	// 	std::cout << res.first.to_styled_string() << std::endl;
-	// }
+	if (res.second > 0)
+	{
+		std::cout << res.first.to_styled_string() << std::endl;
+	}
 
 	Scene s = {"Test", {{1, 2}, {3, 4}}};
 	auto res2 = serialize(s);

@@ -1,7 +1,7 @@
 #include "netx/meta/intrusive_list.hpp"
 #include <iostream>
 
-using namespace netx;
+using namespace netx::meta;
 
 struct Test : public Intrusive_list<Test>::Node
 {

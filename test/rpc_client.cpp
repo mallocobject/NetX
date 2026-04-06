@@ -1,16 +1,15 @@
-#include "elog/logger.h"
+#include "elog/logger.hpp"
 #include "netx/async/async_main.hpp"
 #include "netx/async/task.hpp"
-#include "netx/net/inet_addr.hpp"
-#include "netx/net/socket.hpp"
-#include "netx/net/stream.hpp"
-#include "netx/rpc/rpc_header.hpp"
-#include "netx/rpc/serialize_traits.hpp"
-#include <cstddef>
-#include <cstdint>
-#include <sys/socket.h>
+#include "netx/async/when_all.hpp"
+#include "netx/rpc/client.hpp"
+#include <thread>
+#include <csignal>
 
-using namespace netx;
+using namespace netx::async;
+using namespace netx::rpc;
+using namespace std::chrono_literals;
+using namespace elog;
 
 struct Point
 {
@@ -28,89 +27,38 @@ struct User
 	std::uint64_t phone_number;
 };
 
-Task<> connect_server(int fd)
+Task<> connect_server(RpcClient& client)
 {
-	Stream s{fd};
-
-	// Buffer payload;
-
-	std::size_t size_before = s.write_buffer()->readableBytes();
-	std::string method_name = "AddPoint";
-	SerializeTraits<std::string>::serialize(s.write_buffer(), method_name);
-
-	using ArgsType = std::tuple<Point, Point>;
-	// ArgsType args{{123, "Alice", {1.0, 2.0}, "alice@github.com",
-	// 13800138000}};
-	ArgsType args{{1.2, 3.6}, {5.8, 9.2}};
-
-	SerializeTraits<ArgsType>::serialize(s.write_buffer(), args);
-
-	RpcHeader h{.magic = kMagic,
-				.version = kVersion,
-				.flags = 1,
-				.header_len = kRpcHeaderWireLength,
-				.body_len = 0,
-				.request_id = 0,
-				.reserved = 0};
-
-	h.body_len = static_cast<std::uint32_t>(s.write_buffer()->readableBytes() -
-											size_before);
-
-	s.write_buffer()->prependRpcHeader(h);
-
-	co_await s.write();
-
-	while (s.read_buffer()->readableBytes() < sizeof(RpcHeaderWire))
+	try
 	{
-		auto rd_buf = co_await s.read();
-		if (!rd_buf)
+		while (true)
 		{
-			co_return;
+			auto [pt, usr] = co_await when_all(
+				client.call<Point>("AddPoint", Point{1, 2}, Point{5.2, 6.8}),
+				client.call<User>("EchoUser", User{8, "liuna", {1, 5}}));
+
+			std::cout << "x: " << pt.x << std::endl;
+			std::cout << "y: " << pt.y << std::endl;
+
+			std::cout << "ID: " << usr.id << "\n";
+			std::cout << "Name: " << usr.name << "\n";
+			std::cout << "Location: (" << usr.loc.x << ", " << usr.loc.y
+					  << ")\n";
+
+			std::this_thread::sleep_for(1s);
 		}
 	}
-
-	h = s.read_buffer()->peekRpcHeader();
-	std::size_t total_len = h.header_len + h.body_len;
-	LOG_DEBUG << total_len;
-
-	while (s.read_buffer()->readableBytes() < total_len)
+	catch (const std::exception& e)
 	{
-		auto rd_buf = co_await s.read();
-		if (!rd_buf)
-		{
-			co_return;
-		}
+		LOG_ERROR("{}", e.what());
+		client.close();
 	}
-
-	s.read_buffer()->retrieve(h.header_len);
-
-	std::cout << h << std::endl;
-
-	using RetType = std::tuple<Point>;
-	RetType ret;
-
-	DeserializeTraits<RetType>::deserialize(s.read_buffer(), &ret);
-
-	auto& res = std::get<0>(ret);
-
-	// std::cout << "ID: " << usr.id << "\n";
-	// std::cout << "Name: " << usr.name << "\n";
-	// std::cout << "Location: (" << usr.loc.x << ", " << usr.loc.y << ")\n";
-	std::cout << "x: " << res.x << std::endl;
-	std::cout << "y: " << res.y << std::endl;
 }
 
 int main()
 {
-	int fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	::signal(SIGPIPE, SIG_IGN);
 
-	InetAddr addr{8080, true};
-
-	int ret = connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-
-	while (!Socket::connect(fd, addr, nullptr))
-	{
-	}
-
-	async_main(connect_server(fd));
+	RpcClient client{"127.0.0.1", 8080};
+	async_main(connect_server(client));
 }

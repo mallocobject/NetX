@@ -20,13 +20,25 @@ class WSConnection
   public:
 	async::Task<std::optional<WSFrame>> receive();
 
-	async::Task<bool> send_text(const std::string& text)
+	async::Task<bool> send_continuation(const std::string& data)
 	{
-		co_return co_await send_frame(WSOpcode::kText, text);
+		co_return co_await send_frame(WSOpcode::kContinuation, data);
 	}
-	async::Task<bool> send_binary(const std::string& text)
+	async::Task<bool> send_text(const std::string& data)
 	{
-		co_return co_await send_frame(WSOpcode::kBinary, text);
+		co_return co_await send_frame(WSOpcode::kText, data);
+	}
+	async::Task<bool> send_binary(const std::string& data)
+	{
+		co_return co_await send_frame(WSOpcode::kBinary, data);
+	}
+	async::Task<bool> send_close(const std::string& data)
+	{
+		co_return co_await send_frame(WSOpcode::kClose, data);
+	}
+	async::Task<bool> send_ping(const std::string& data)
+	{
+		co_return co_await send_frame(WSOpcode::kPing, data);
 	}
 	async::Task<bool> send_pong(const std::string& data)
 	{
@@ -37,7 +49,7 @@ class WSConnection
 	{
 	}
 
-	//   private:
+  private:
 	async::Task<bool> send_frame(WSOpcode opcode, const std::string& payload);
 
   private:

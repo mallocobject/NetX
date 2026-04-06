@@ -26,7 +26,7 @@ template <typename T> struct LockFreeQueue
 
 	LockFreeQueue()
 	{
-		Node* dummy = new Node(T(nullptr));
+		Node* dummy = new Node(T{});
 		head.store(dummy, std::memory_order_release);
 		tail.store(dummy, std::memory_order_release);
 	}

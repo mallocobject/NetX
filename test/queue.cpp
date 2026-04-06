@@ -3,7 +3,7 @@
 #include <iostream>
 #include <thread>
 
-using namespace netx;
+using namespace netx::meta;
 
 int main()
 {

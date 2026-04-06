@@ -30,7 +30,7 @@ template <typename T = void> struct Task
 	friend struct WhenAllAwaiter;
 	friend struct WhenAnyCtrlBlock;
 
-	explicit Task(coro_handle coro) noexcept : coro_(coro)
+	explicit Task(coro_handle coro = nullptr) noexcept : coro_(coro)
 	{
 	}
 

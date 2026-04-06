@@ -3,7 +3,7 @@
 #include "netx/async/sleep.hpp"
 #include "netx/async/task.hpp"
 
-using namespace netx;
+using namespace netx::async;
 using namespace std::chrono_literals;
 
 Task<> t1()
