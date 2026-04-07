@@ -1,8 +1,8 @@
-# add_library(netx INTERFACE)
-set(SQLITE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/db/sqlite3.c)
-set(SHELL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/db/shell.c)
+add_library(netx INTERFACE)
+# set(SQLITE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/db/sqlite3.c)
+# set(SHELL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/db/shell.c)
 
-add_library(netx STATIC ${SQLITE_SRC})
+# add_library(netx STATIC ${SQLITE_SRC})
 
 target_include_directories(netx
     INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..
