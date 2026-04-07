@@ -1,3 +1,4 @@
+#include "elog/logger.hpp"
 #include "netx/async/sleep.hpp"
 #include "netx/async/when_any.hpp"
 #include "netx/http/response.hpp"
@@ -199,6 +200,7 @@ int main()
 					}
 					else if (frame->opcode == WSOpcode::kPong)
 					{
+						LOG_INFO("WS received Pong Frame");
 						waiting_pong = false;
 					}
 					else if (frame->opcode == WSOpcode::kText ||

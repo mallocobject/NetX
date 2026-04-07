@@ -21,7 +21,7 @@ class HttpSender
 		{
 			co_return co_await send_file(stream, res);
 		}
-		else
+		else if (res->type() == ResponseType::kBody)
 		{
 			co_return co_await stream->write(res->to_formatted_string());
 		}
