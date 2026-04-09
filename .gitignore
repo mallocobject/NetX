@@ -1,7 +1,3 @@
 build
 .cache
-corpc
-py
-.vscode
-.claude
-examples
+test
