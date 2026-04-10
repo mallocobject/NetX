@@ -11,11 +11,14 @@
 #include <exception>
 #include <span>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 namespace netx
 {
 namespace core
+{
+namespace details
 {
 struct WhenAnyCtlBlock
 {
@@ -60,7 +63,15 @@ Task<Expected<>> WhenAnyHelper(A&& t, WhenAnyCtlBlock& ctl, Expected<T>& result,
 {
 	try
 	{
-		result = std::move(co_await std::forward<A>(t));
+		if constexpr (std::is_same_v<T, NonVoidHelper<void>>)
+		{
+			co_await std::forward<A>(t);
+			result = T{};
+		}
+		else
+		{
+			result = co_await std::forward<A>(t);
+		}
 		ctl.try_complete(index, nullptr);
 	}
 	catch (...)
@@ -78,15 +89,26 @@ struct WhenAnyAwaiter
 	}
 
 	template <typename P>
-	void await_suspend(std::coroutine_handle<P> coro) const noexcept
+	bool await_suspend(std::coroutine_handle<P> coro) const noexcept
 	{
+		bool has_no_done_task = false;
 		auto& promise = coro.promise();
-		promise.state = Handle::State::kSuspend;
-		ctl.waiter = &promise;
 		for (const auto& t : ctl.tasks)
 		{
-			t.coro.promise().schedule();
+			if (t.valid() && !t.done())
+			{
+				has_no_done_task = true;
+				t.coro.promise().schedule();
+			}
 		}
+
+		if (has_no_done_task)
+		{
+			promise.state = Handle::State::kSuspend;
+			ctl.waiter = &promise;
+		}
+
+		return has_no_done_task;
 	}
 
 	void await_resume() const
@@ -105,10 +127,10 @@ Task<Expected<std::variant<UnpackedRetType<Ts>...>>> when_any_impl(
 	std::index_sequence<Is...>, Ts&&... ts)
 {
 	WhenAnyCtlBlock ctl{};
-	std::tuple<typename AwaitableTrait<Ts>::RetType...> results;
-	Task<Expected<>> helper[]{
+	std::tuple<Expected<UnpackedRetType<Ts>>...> results;
+	Task<Expected<>> helpers[]{
 		WhenAnyHelper(std::forward<Ts>(ts), ctl, std::get<Is>(results), Is)...};
-	ctl.tasks = helper;
+	ctl.tasks = helpers;
 
 	co_await WhenAnyAwaiter{ctl};
 
@@ -151,11 +173,12 @@ Task<Expected<std::variant<UnpackedRetType<Ts>...>>> when_any_impl(
 
 	co_return out;
 }
+} // namespace details
 
 template <typename... Ts> auto when_any(Ts&&... ts)
 {
-	return when_any_impl(std::make_index_sequence<sizeof...(Ts)>{},
-						 std::forward<Ts>(ts)...);
+	return details::when_any_impl(std::make_index_sequence<sizeof...(Ts)>{},
+								  std::forward<Ts>(ts)...);
 }
 } // namespace core
 } // namespace netx

@@ -13,6 +13,8 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
 struct EpollPoller
 {
 	EpollPoller()
@@ -95,5 +97,6 @@ struct EpollPoller
 	std::uint64_t registered_event_count_{1};
 	std::vector<epoll_event> evs_;
 };
+} // namespace details
 } // namespace core
 } // namespace netx

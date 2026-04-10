@@ -6,6 +6,8 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
 using HandleId = std::uint64_t;
 struct Handle
 {
@@ -44,5 +46,6 @@ struct HandleInfo
 	HandleId id{0};
 	Handle* handle{nullptr};
 };
+} // namespace details
 } // namespace core
 } // namespace netx

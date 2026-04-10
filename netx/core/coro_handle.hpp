@@ -6,6 +6,8 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
 struct CoroHandle : Handle
 {
 	void schedule()
@@ -19,11 +21,13 @@ struct CoroHandle : Handle
 
 	void cancel()
 	{
-		if (state == Handle::State::kScheduled)
+		if (state == Handle::State::kScheduled ||
+			state == Handle::State::kSuspend)
 		{
 			EventLoop::loop().cancel(*this);
 		}
 	}
 };
+} // namespace details
 } // namespace core
 } // namespace netx

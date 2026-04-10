@@ -7,6 +7,8 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
 struct Event
 {
 	static constexpr std::uint32_t kEventRead{EPOLLIN};
@@ -16,5 +18,6 @@ struct Event
 	int fd{-1};
 	std::uint32_t flags{0};
 };
+} // namespace details
 } // namespace core
 } // namespace netx

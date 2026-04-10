@@ -12,11 +12,27 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
+inline constexpr struct NoWaitAtInitialSuspend
+{
+} no_wait_at_initial_suspend{};
+} // namespace details
 template <typename T = void> struct [[nodiscard]] Task
 {
-	struct promise_type : CoroHandle, Result<T>
+	struct promise_type : details::CoroHandle, details::Result<T>
 	{
-		promise_type()
+		promise_type() = default;
+
+		template <typename... Args>
+		promise_type(details::NoWaitAtInitialSuspend, Args&&...) noexcept
+			: wait_at_initial_suspend(false)
+		{
+		}
+
+		template <typename Obj, typename... Args>
+		promise_type(Obj&&, details::NoWaitAtInitialSuspend, Args&&...) noexcept
+			: wait_at_initial_suspend(false)
 		{
 		}
 
@@ -26,9 +42,27 @@ template <typename T = void> struct [[nodiscard]] Task
 				std::coroutine_handle<promise_type>::from_promise(*this)};
 		}
 
-		std::suspend_always initial_suspend() const noexcept
+		auto initial_suspend() const noexcept
 		{
-			return {};
+			struct
+			{
+				bool await_ready() const noexcept
+				{
+					return !wait_at_initial_suspend;
+				}
+
+				void await_suspend(std::coroutine_handle<>) const noexcept
+				{
+				}
+
+				void await_resume() const noexcept
+				{
+				}
+
+				bool wait_at_initial_suspend{true};
+			} initial_suspend_awaiter{wait_at_initial_suspend};
+
+			return initial_suspend_awaiter;
 		}
 
 		std::suspend_always final_suspend() noexcept
@@ -63,7 +97,10 @@ template <typename T = void> struct [[nodiscard]] Task
 
 				U await_resume()
 				{
-					return std::move(exp.value());
+					if constexpr (!std::is_void_v<U>)
+					{
+						return std::move(exp.value());
+					}
 				}
 
 				Expected<U> exp;
@@ -97,6 +134,7 @@ template <typename T = void> struct [[nodiscard]] Task
 		}
 
 		CoroHandle* continuation{nullptr};
+		bool wait_at_initial_suspend{true};
 	};
 
 	struct AwaiterBase
@@ -109,12 +147,12 @@ template <typename T = void> struct [[nodiscard]] Task
 		template <typename P>
 		void await_suspend(std::coroutine_handle<P> caller_coro) const noexcept
 		{
-			static_assert(std::is_base_of_v<CoroHandle, P>,
+			static_assert(std::is_base_of_v<details::CoroHandle, P>,
 						  "Caller promise must inherit CoroHandle");
 
 			auto* caller = &caller_coro.promise();
 
-			caller->state = Handle::State::kSuspend;
+			caller->state = details::Handle::State::kSuspend;
 			callee_coro.promise().continuation = caller;
 			callee_coro.promise().schedule();
 		}
@@ -215,7 +253,7 @@ template <typename T> auto Task<T>::operator co_await() && noexcept
 
 	return awaiter;
 }
-static_assert(Promise<Task<>::promise_type>);
-static_assert(Future<Task<>>);
+static_assert(details::Promise<Task<>::promise_type>);
+static_assert(details::Future<Task<>>);
 } // namespace core
 } // namespace netx

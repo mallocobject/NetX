@@ -7,6 +7,8 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
 template <typename A>
 concept Awaiter = requires(A a, std::coroutine_handle<> h) {
 	{ a.await_ready() } -> std::convertible_to<bool>;
@@ -37,5 +39,6 @@ concept Promise = requires(P p) {
 		requires(int v) { p.return_value(v); } ||
 		requires { p.return_void(); });
 };
+} // namespace details
 } // namespace core
 } // namespace netx

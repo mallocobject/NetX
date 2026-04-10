@@ -9,6 +9,8 @@ namespace netx
 {
 namespace core
 {
+namespace details
+{
 template <typename T = void> struct Result
 {
 	template <typename... Args> void return_value(Args&&... args)
@@ -116,5 +118,6 @@ template <typename T> struct Result<T&> : Result<std::reference_wrapper<T>>
 template <typename T> struct Result<T&&> : Result<T>
 {
 };
+} // namespace details
 } // namespace core
 } // namespace netx
