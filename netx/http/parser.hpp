@@ -261,9 +261,22 @@ inline bool Parser::consume(char c)
 			if (auto it = req.header_params.find("content-length");
 				it != req.header_params.end())
 			{
-				body_remaining_ = std::stol(it->second);
-				req.body.reserve(body_remaining_);
-				state = (body_remaining_ > 0) ? State::kBody : State::kComplete;
+				try
+				{
+					body_remaining_ = std::stoul(it->second);
+					if (body_remaining_ > 10 * 1024 * 1024)
+					{
+						return false; // 限制Body最大10MB
+					}
+
+					req.body.reserve(body_remaining_);
+					state =
+						(body_remaining_ > 0) ? State::kBody : State::kComplete;
+				}
+				catch (...)
+				{
+					return false; // 非法数字
+				}
 			}
 			else
 			{

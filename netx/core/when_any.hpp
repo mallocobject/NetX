@@ -123,11 +123,11 @@ struct WhenAnyAwaiter
 };
 
 template <size_t... Is, typename... Ts>
-Task<Expected<std::variant<UnpackedRetType<Ts>...>>> when_any_impl(
+Task<Expected<std::variant<NonVoidRetType<Ts>...>>> when_any_impl(
 	std::index_sequence<Is...>, Ts&&... ts)
 {
 	WhenAnyCtlBlock ctl{};
-	std::tuple<Expected<UnpackedRetType<Ts>>...> results;
+	std::tuple<NonVoidRetType<Ts>...> results;
 	Task<Expected<>> helpers[]{
 		WhenAnyHelper(std::forward<Ts>(ts), ctl, std::get<Is>(results), Is)...};
 	ctl.tasks = helpers;
@@ -149,7 +149,7 @@ Task<Expected<std::variant<UnpackedRetType<Ts>...>>> when_any_impl(
 		co_return winner_ec;
 	}
 
-	using VariantType = std::variant<UnpackedRetType<Ts>...>;
+	using VariantType = std::variant<NonVoidRetType<Ts>...>;
 	VariantType out;
 
 	((ctl.winner == Is
@@ -157,14 +157,14 @@ Task<Expected<std::variant<UnpackedRetType<Ts>...>>> when_any_impl(
 				[&]
 				{
 					if constexpr (std::is_void_v<
-									  typename AwaitableTrait<Ts>::ValueType>)
+									  typename AwaitableTrait<Ts>::RetType>)
 					{
 						out.template emplace<Is>(NonVoidHelper<>{});
 					}
 					else
 					{
 						out.template emplace<Is>(
-							std::move(std::get<Is>(results)).value());
+							std::move(std::get<Is>(results)));
 					}
 				}(),
 				0)

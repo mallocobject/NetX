@@ -5,8 +5,12 @@
 #include "netx/core/sleep.hpp"
 #include "netx/core/when_any.hpp"
 #include "netx/http/router.hpp"
+#include "netx/http/sender.hpp"
 #include "netx/http/session.hpp"
 #include "netx/net/server.hpp"
+#include "netx/net/socket.hpp"
+#include "netx/net/stream.hpp"
+#include <cassert>
 #include <utility>
 namespace netx
 {
@@ -23,7 +27,13 @@ class Server : public net::details::Server<Server>
   public:
 	static Server& server()
 	{
-		static Server http_server{};
+		// FIXME
+		int fd1 = open("/dev/null", O_RDONLY | O_CLOEXEC);
+		int fd2 = (fd1 >= 0) ? dup(fd1) : -1;
+		assert(fd1 != -1 && fd2 != -1);
+		int fd = net::details::Socket::socket().value();
+		static Server http_server{net::details::Stream::create(fd).value(), fd1,
+								  fd2};
 		return http_server;
 	}
 
@@ -53,47 +63,51 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 														  int write_fd)
 {
 
-	net::details::Stream s =
-		co_await net::details::Stream::create(read_fd, write_fd);
+	auto stream_exp = net::details::Stream::create(read_fd, write_fd);
+	if (!stream_exp.has_value())
+	{
+		::close(read_fd);
+		::close(write_fd);
+		co_return {};
+	}
+
+	net::details::Stream s = std::move(stream_exp.value());
 	details::Session session{};
 
 	try
 	{
 		while (true)
 		{
-			auto exp = co_await core::when_any(s.read(), core::sleep(timeout_));
 			if (s.write_fd == -1)
 			{
 				co_return {};
 			}
 
-			if (!exp.has_value())
-			{
-				const std::error_code& ec = exp.error();
-				if (ec == core::details::Error::Timeout)
-				{
+			auto any_res =
+				co_await core::when_any(s.read(), core::sleep(timeout_));
 
-					if (auto exp2 =
-							co_await s.write("HTTP/1.1 408 Request Timeout\r\n"
-											 "Content-Length: 0\r\n"
-											 "Connection: close\r\n"
-											 "\r\n");
-						!exp2.has_value())
-					{
-						const std::error_code& ec2 = exp.error();
-						elog::LOG_ERROR("{}, {}", ec2.value(), ec2.message());
-						co_return {};
-					}
-					s.shutdown();
-					co_return {};
-				}
-				elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
+			if (!any_res.has_value())
+			{
 				co_return {};
 			}
 
-			auto ret = std::move(exp.value());
-			if (!std::get<0>(ret))
+			auto& val = any_res.value();
+			if (val.index() == 1)
 			{
+				co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection: "
+								 "close\r\n\r\n");
+				s.shutdown();
+				co_return {};
+			}
+
+			auto& read_exp = std::get<0>(val);
+			if (!read_exp)
+			{
+				if (read_exp.error() != core::details::Error::BrokenPipe)
+				{
+					elog::LOG_DEBUG("Client read error: {}",
+									read_exp.error().message());
+				}
 				co_return {};
 			}
 
@@ -101,10 +115,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 			{
 				if (!session.parse(s.read_buf))
 				{
-					co_await s.write("HTTP/1.1 400 Bad Request\r\n"
-									 "Content-Length: 0\r\n"
-									 "Connection: close\r\n"
-									 "\r\n");
+					co_await s.write("HTTP/1.1 400 Bad Request\r\nConnection: "
+									 "close\r\n\r\n");
 					s.shutdown();
 					co_return {};
 				}
@@ -113,7 +125,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 				{
 					auto& req = session.req();
 
-					auto res = co_await router_.dispatch(req);
+					auto res_exp = co_await router_.dispatch(req);
 
 					// if (res.status_code() == 101)
 					// {
@@ -137,6 +149,9 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					// 	co_return;
 					// }
 
+					Response res = res_exp ? std::move(res_exp.value())
+										   : Response{}.with_status(500);
+
 					bool is_keep = (req.header("connection") != "close");
 					if (req.version == "HTTP/1.0" &&
 						req.header("connection") != "keep-alive")
@@ -145,14 +160,15 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					}
 					res.keep_alive(is_keep);
 
-					co_await HttpSender::send(&s, &res);
-
-					if (!is_keep)
+					auto send_res = co_await details::Sender::send(s, res);
+					if (!send_res || !is_keep)
 					{
 						s.shutdown();
-						co_return;
+						co_return {};
 					}
+
 					session.clear();
+					s.read_buf.try_shrink();
 				}
 				else
 				{
@@ -166,7 +182,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 		elog::LOG_ERROR("Exception in handleClient: {}", e.what());
 	}
 
-	co_return;
+	co_return {};
 }
 } // namespace http
 } // namespace netx

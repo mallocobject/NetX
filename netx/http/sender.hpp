@@ -20,14 +20,12 @@ class Sender
 	{
 		if (res.type == ResponseType::kFile)
 		{
-			co_await co_await send_file(stream, res);
+			co_return co_await send_file(stream, res);
 		}
-		else if (res.type == ResponseType::kBody)
+		else
 		{
-			co_await co_await stream.write(res.to_formatted_string());
+			co_return co_await stream.write(res.to_formatted_string());
 		}
-
-		co_return {};
 	}
 
 	// Sender() = default;
@@ -39,65 +37,67 @@ class Sender
 												  Response& res)
 	{
 		const std::string& path = res.file;
-		struct stat st;
-
-		if (::stat(path.c_str(), &st) == -1 || !S_ISREG(st.st_mode))
-		{
-			res.with_status(404)
-				.content_type("text/html; charset=utf-8")
-				.with_body("<h1>404 Not Found</h1>");
-			co_await co_await stream.write(res.to_formatted_string());
-		}
-
-		int fd = ::open(path.c_str(), O_RDONLY);
-
+		int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
 		if (fd == -1)
 		{
-			res.with_status(500)
-				.content_type("text/html; charset=utf-8")
-				.with_body("<h1>500 Internal Server Error</h1>");
-			co_await co_await stream.write(res.to_formatted_string());
-		}
-
-		if (::fstat(fd, &st) == -1 || !S_ISREG(st.st_mode))
-		{
-			net::details::Socket::close(fd);
-			res.with_status(500)
-				.content_type("text/html; charset=utf-8")
-				.with_body("<h1>500 Internal Server Error</h1>");
-			co_await co_await stream.write(res.to_formatted_string());
-		}
-
-		void* mapped =
-			::mmap(nullptr, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-		if (mapped == MAP_FAILED)
-		{
-			net::details::Socket::close(fd);
-			res.with_status(500)
-				.content_type("text/html; charset=utf-8")
-				.with_body("<h1>500 Internal Server Error</h1>");
+			res.with_status(404).with_body("<h1>404 Not Found</h1>");
 			co_return co_await stream.write(res.to_formatted_string());
 		}
 
-		res.with_status(200).with_header("Content-Length",
-										 std::to_string(st.st_size));
-		co_return co_await stream.write(res.to_formatted_string());
+		struct stat st;
+		if (::fstat(fd, &st) == -1 || !S_ISREG(st.st_mode))
+		{
+			::close(fd);
+			res.with_status(404).with_body("<h1>404 Not Found</h1>");
+			co_return co_await stream.write(res.to_formatted_string());
+		}
 
-		char* ptr = reinterpret_cast<char*>(mapped);
-		std::size_t remaining = st.st_size;
+		size_t size = st.st_size;
+		res.with_status(200).with_header("Content-Length",
+										 std::to_string(size));
+
+		if (auto exp = co_await stream.write(res.to_formatted_string());
+			!exp.has_value())
+		{
+			::close(fd);
+			co_return exp.error();
+		}
+
+		if (size == 0)
+		{
+			::close(fd);
+			co_return {};
+		}
+
+		void* mapped = ::mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+		::close(fd);
+		if (mapped == MAP_FAILED)
+		{
+			co_return core::details::make_error_code(
+				core::details::Error::ResourceExhausted);
+		}
+
+		const char* ptr = reinterpret_cast<const char*>(mapped);
+		size_t remaining = size;
+		core::Expected<> write_res{};
+
 		while (remaining > 0)
 		{
-			std::size_t to_send =
+			size_t to_send =
 				std::min(remaining, net::details::Stream::kChunkSize);
-			co_await co_await stream.write(std::string_view(ptr, to_send));
+			write_res = co_await stream.write(std::string_view(ptr, to_send));
+
+			if (!write_res)
+			{
+				break;
+			}
 
 			ptr += to_send;
 			remaining -= to_send;
 		}
 
 		::munmap(mapped, st.st_size);
-		net::details::Socket::close(fd);
-		co_return true;
+		co_return write_res;
 	}
 };
 } // namespace details

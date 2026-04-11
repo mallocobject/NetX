@@ -44,7 +44,7 @@ struct EventLoop
 			auto res = registered ? poller.modify_event(event)
 								  : poller.register_event(event);
 
-			if (res)
+			if (res.has_value())
 			{
 				registered = true;
 				exp = std::move(res);
@@ -113,8 +113,7 @@ struct EventLoop
 
 	void call_soon(Handle& handle)
 	{
-		if (handle.state == Handle::State::kCancelled ||
-			handle.state == Handle::State::kScheduled)
+		if (handle.state == Handle::State::kCancelled)
 		{
 			return;
 		}
@@ -125,8 +124,7 @@ struct EventLoop
 
 	void call_at(TimePoint tp, Handle& handle)
 	{
-		if (handle.state == Handle::State::kCancelled ||
-			handle.state == Handle::State::kScheduled)
+		if (handle.state == Handle::State::kCancelled)
 		{
 			return;
 		}
@@ -145,8 +143,7 @@ struct EventLoop
 
 	void cancel(Handle& handle)
 	{
-		if (handle.state == Handle::State::kScheduled ||
-			handle.state == Handle::State::kSuspend)
+		if (handle.state == Handle::State::kScheduled)
 		{
 			const auto& id = handle.id;
 			if (auto it = scheduled_query_.find(id);
@@ -228,10 +225,6 @@ inline void EventLoop::run_once()
 	auto events = exp.value();
 	for (auto& event : events)
 	{
-		if (event.info.handle)
-		{
-			event.info.handle->state = Handle::State::kScheduled;
-		}
 		ready_.push(std::move(event.info));
 	}
 
@@ -258,8 +251,11 @@ inline void EventLoop::run_once()
 			continue;
 		}
 
-		info.handle->state = Handle::State::kUnscheduled;
-		info.handle->run();
+		if (info.handle)
+		{
+			info.handle->state = Handle::State::kUnscheduled;
+			info.handle->run();
+		}
 	}
 }
 

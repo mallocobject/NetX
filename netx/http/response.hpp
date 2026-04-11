@@ -15,6 +15,7 @@ enum class ResponseType : std::uint8_t
 	kBody,
 	kFile
 };
+} // namespace details
 
 struct Response
 {
@@ -58,7 +59,7 @@ struct Response
 
 	Response& with_file(const std::string& path)
 	{
-		type = ResponseType::kFile;
+		type = details::ResponseType::kFile;
 		file = path;
 
 		this->content_type(guess_mime_type(path));
@@ -67,7 +68,7 @@ struct Response
 
 	Response& with_body(const std::string& entity)
 	{
-		type = ResponseType::kBody;
+		type = details::ResponseType::kBody;
 		body = entity;
 		with_header("Content-Length", std::to_string(body.size()));
 
@@ -76,7 +77,7 @@ struct Response
 
 	Response& with_body(std::string&& entity)
 	{
-		type = ResponseType::kBody;
+		type = details::ResponseType::kBody;
 		body = std::move(entity);
 		with_header("Content-Length", std::to_string(body.size()));
 
@@ -145,7 +146,7 @@ struct Response
 	std::unordered_map<std::string, std::string> header_params_;
 	std::string body;
 
-	ResponseType type{ResponseType::kBody};
+	details::ResponseType type{details::ResponseType::kBody};
 	std::string file;
 };
 
@@ -169,6 +170,5 @@ inline std::string Response::to_formatted_string() const
 
 	return result;
 }
-} // namespace details
 } // namespace http
 } // namespace netx

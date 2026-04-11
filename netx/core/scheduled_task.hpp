@@ -17,6 +17,10 @@ template <Future TaskT> struct ScheduledTask
 
 	struct DeleteNodeHandle : CoroHandle
 	{
+		DeleteNodeHandle(TaskList& o, TaskListIter it) : owner(o), iter(it)
+		{
+		}
+
 		void run() override final
 		{
 			if (iter != owner.end())

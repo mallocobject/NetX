@@ -111,7 +111,7 @@ template <typename Derived> struct Server
 			elog::LOG_FATAL(
 				"loop count must more than or equal 1, but now is {}",
 				loop_count);
-			return *this;
+			return *static_cast<Derived*>(this);
 		}
 		loop_count_ = loop_count;
 		return *static_cast<Derived*>(this);

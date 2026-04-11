@@ -33,7 +33,7 @@ Task<Expected<>> t()
 	{
 		if (ep.value().index() == 0)
 		{
-			elog::LOG_INFO("{}", std::get<0>(ep.value()));
+			elog::LOG_INFO("{}", std::get<0>(ep.value()).value());
 		}
 	}
 	co_return {};

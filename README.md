@@ -23,26 +23,27 @@
 ##  HTTP Server Setup Example
 
 ```cpp
+#include "netx/core/expected.hpp"
+#include "netx/core/task.hpp"
+#include "netx/http/request.hpp"
 #include "netx/http/response.hpp"
 #include "netx/http/server.hpp"
-#include <utility>
 
+using namespace netx::core;
 using namespace netx::http;
-using namespace netx::net;
-using namespace netx::async;
 using namespace std::chrono_literals;
 
 int main()
 {
-	HttpServer::server()
+	Server::server()
 		.listen("127.0.0.1", 8080)
 		.route("GET", "/",
-			   [](HttpRequest* req) -> Task<HttpResponse>
+			   [](Request& req) -> Task<Expected<Response>>
 			   {
-				   co_return std::move(HttpResponse{}
-										   .status(200)
-										   .content_type("text/html")
-										   .body("<h1>Hello Netx</h1>"));
+				   co_return Response{}
+					   .with_status(200)
+					   .content_type("text/html")
+					   .with_body("<h1>Hello NetX</h1>");
 			   })
 		.timeout(3s)
 		.loop(8)

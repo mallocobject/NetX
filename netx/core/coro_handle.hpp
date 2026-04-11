@@ -10,6 +10,24 @@ namespace details
 {
 struct CoroHandle : Handle
 {
+	// void schedule()
+	// {
+	// 	if (state == Handle::State::kUnscheduled ||
+	// 		state == Handle::State::kSuspend)
+	// 	{
+	// 		EventLoop::loop().call_soon(*this);
+	// 	}
+	// }
+
+	// void cancel()
+	// {
+	// 	if (state == Handle::State::kScheduled ||
+	// 		state == Handle::State::kSuspend)
+	// 	{
+	// 		EventLoop::loop().cancel(*this);
+	// 	}
+	// }
+
 	void schedule()
 	{
 		if (state == Handle::State::kUnscheduled ||
@@ -18,11 +36,9 @@ struct CoroHandle : Handle
 			EventLoop::loop().call_soon(*this);
 		}
 	}
-
 	void cancel()
 	{
-		if (state == Handle::State::kScheduled ||
-			state == Handle::State::kSuspend)
+		if (state != Handle::State::kCancelled)
 		{
 			EventLoop::loop().cancel(*this);
 		}

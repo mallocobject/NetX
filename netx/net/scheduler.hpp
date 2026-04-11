@@ -42,7 +42,7 @@ struct Scheduler
 
 	core::Expected<> wakeup();
 
-	void push(core::Task<>&& task)
+	void push(core::Task<core::Expected<>>&& task)
 	{
 		task_queue_.push(std::move(task));
 	}
@@ -68,8 +68,8 @@ struct Scheduler
 	core::Expected<> shallow();
 
   private:
-	LockFreeQueue<core::Task<>> task_queue_;
-	std::list<core::details::ScheduledTask<core::Task<>>> sts_;
+	LockFreeQueue<core::Task<core::Expected<>>> task_queue_;
+	std::list<core::details::ScheduledTask<core::Task<core::Expected<>>>> sts_;
 
 	int wakeup_fd_{-1};
 	core::details::EventLoop::EventAwaiter wakeup_awaiter_;
@@ -150,14 +150,13 @@ inline core::Task<core::Expected<>> Scheduler::scheduler_loop(
 			co_return {};
 		}
 
-		core::Task<> tmp{nullptr};
+		core::Task<core::Expected<>> tmp{nullptr};
 		while (task_queue_.pop(tmp))
 		{
 			sts_.emplace_back();
 			auto it = std::prev(sts_.end());
 
-			*it = core::details::ScheduledTask<core::Task<>>(std::move(tmp),
-															 sts_, it);
+			*it = core::details::ScheduledTask(std::move(tmp), sts_, it);
 		}
 	}
 }

@@ -27,16 +27,25 @@ template <typename T> struct LockFreeQueue
 
 	LockFreeQueue()
 	{
-		Node* dummy = new Node(T{});
+		Node* dummy = new Node(T{nullptr});
+
 		head.store(dummy, std::memory_order_release);
 		tail.store(dummy, std::memory_order_release);
 	}
 
 	LockFreeQueue(LockFreeQueue&& other) noexcept
-		: head(std::exchange(other.head, nullptr)),
-		  tail(std::exchange(other.tail, nullptr)),
-		  count(std::exchange(other.count, 0))
 	{
+		Node* old_head = other.head.load(std::memory_order_relaxed);
+		head.store(old_head, std::memory_order_relaxed);
+		other.head.store(nullptr, std::memory_order_relaxed);
+
+		Node* old_tail = other.tail.load(std::memory_order_relaxed);
+		tail.store(old_tail, std::memory_order_relaxed);
+		other.tail.store(nullptr, std::memory_order_relaxed);
+
+		size_t old_count = other.count.load(std::memory_order_relaxed);
+		count.store(old_count, std::memory_order_relaxed);
+		other.count.store(0, std::memory_order_relaxed);
 	}
 
 	~LockFreeQueue()
