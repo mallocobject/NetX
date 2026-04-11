@@ -24,7 +24,7 @@ struct Stream
 
 	static core::Expected<Stream> create(int fd)
 	{
-		if (auto exp = Socket::set_non_blocking(fd); !exp.has_value())
+		if (auto exp = Socket::set_non_blocking(fd); !exp)
 		{
 			return exp.error();
 		}
@@ -40,12 +40,12 @@ struct Stream
 
 	static core::Expected<Stream> create(int fd1, int fd2)
 	{
-		if (auto exp = Socket::set_non_blocking(fd1); !exp.has_value())
+		if (auto exp = Socket::set_non_blocking(fd1); !exp)
 		{
 			return exp.error();
 		}
 
-		if (auto exp = Socket::set_non_blocking(fd2); !exp.has_value())
+		if (auto exp = Socket::set_non_blocking(fd2); !exp)
 		{
 			return exp.error();
 		}
@@ -55,11 +55,11 @@ struct Stream
 
 	core::Expected<> close()
 	{
-		if (auto exp = read_awaiter_.reset(); !exp.has_value())
+		if (auto exp = read_awaiter_.reset(); !exp)
 		{
 			return exp.error();
 		}
-		if (auto exp = write_awaiter_.reset(); !exp.has_value())
+		if (auto exp = write_awaiter_.reset(); !exp)
 		{
 			return exp.error();
 		}
@@ -78,14 +78,14 @@ struct Stream
 
 	core::Expected<> shutdown()
 	{
-		if (auto exp = write_awaiter_.reset(); !exp.has_value())
+		if (auto exp = write_awaiter_.reset(); !exp)
 		{
 			return exp.error();
 		}
 
 		if (write_fd > 0)
 		{
-			if (auto exp = Socket::shutdown(write_fd); !exp.has_value())
+			if (auto exp = Socket::shutdown(write_fd); !exp)
 			{
 				return exp.error();
 			}

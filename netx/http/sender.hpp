@@ -56,8 +56,7 @@ class Sender
 		res.with_status(200).with_header("Content-Length",
 										 std::to_string(size));
 
-		if (auto exp = co_await stream.write(res.to_formatted_string());
-			!exp.has_value())
+		if (auto exp = co_await stream.write(res.to_formatted_string()); !exp)
 		{
 			::close(fd);
 			co_return exp.error();

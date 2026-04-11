@@ -137,13 +137,13 @@ inline core::Task<core::Expected<>> Scheduler::scheduler_loop(
 
 	while (true)
 	{
-		if (auto exp = co_await wakeup_awaiter_; !exp.has_value())
+		if (auto exp = co_await wakeup_awaiter_; !exp)
 		{
 			const std::error_code& ec = exp.error();
 			elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
 			co_return {};
 		}
-		if (auto exp = shallow(); !exp.has_value())
+		if (auto exp = shallow(); !exp)
 		{
 			const std::error_code& ec = exp.error();
 			elog::LOG_ERROR("{}, {}", ec.value(), ec.message());

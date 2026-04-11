@@ -11,7 +11,7 @@ using namespace std::chrono_literals;
 int main()
 {
 	Server::server()
-		.listen("127.0.0.1", 8080)
+		.listen(8080)
 		.route("GET", "/",
 			   [](Request& req) -> Task<Expected<Response>>
 			   {

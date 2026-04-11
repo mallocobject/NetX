@@ -5,6 +5,7 @@
 #include "netx/http/radix_tree.hpp"
 #include "netx/http/request.hpp"
 #include "netx/http/response.hpp"
+#include "netx/websocket/connection.hpp"
 namespace netx
 {
 namespace http
@@ -13,7 +14,8 @@ namespace details
 {
 using HttpHandler =
 	std::function<core::Task<core::Expected<Response>>(Request&)>;
-// using WSHandler = std::function<async::Task<>(ws::WSConnection*)>;
+using WsHandler = std::function<core::Task<core::Expected<>>(
+	websocket::details::Connection&)>;
 
 struct Router
 {
@@ -24,27 +26,28 @@ struct Router
 		trees_[method].insert(path, std::forward<Handler>(handler));
 	}
 
-	// void route_ws(const std::string& path, WSHandler handler)
-	// {
-	// 	route("GET", path,
-	// 		  [](HttpRequest* req) -> async::Task<HttpResponse>
-	// 		  {
-	// 			  HttpResponse res;
-	// 			  if (req->header("upgrade") == "websocket")
-	// 			  {
-	// 				  res.status(101);
-	// 			  }
-	// 			  co_return res;
-	// 		  });
+	template <typename Handler>
+	void route_ws(const std::string& path, Handler&& handler)
+	{
+		route("GET", path,
+			  [](Request& req) -> core::Task<core::Expected<Response>>
+			  {
+				  Response res;
+				  if (req.header("upgrade") == "websocket")
+				  {
+					  res.with_status(101);
+				  }
+				  co_return res;
+			  });
 
-	// 	ws_tree_.insert(path, std::move(handler));
-	// }
+		ws_tree_.insert(path, std::move(handler));
+	}
 
-	// WSHandler get_ws_handler(const std::string& path)
-	// {
-	// 	auto match = ws_tree_.search(path);
-	// 	return match.value ? *match.value : nullptr;
-	// }
+	WsHandler get_ws_handler(const std::string& path)
+	{
+		auto match = ws_tree_.search(path);
+		return match.value ? *match.value : nullptr;
+	}
 
 	core::Task<core::Expected<Response>> dispatch(Request& req);
 
@@ -57,7 +60,7 @@ struct Router
 
   private:
 	std::unordered_map<std::string, RadixTree<HttpHandler>> trees_;
-	// RadixTree<WSHandler> ws_tree_;
+	RadixTree<WsHandler> ws_tree_;
 };
 
 inline core::Task<core::Expected<Response>> Router::dispatch(Request& req)

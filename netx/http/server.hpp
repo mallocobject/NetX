@@ -10,6 +10,7 @@
 #include "netx/net/server.hpp"
 #include "netx/net/socket.hpp"
 #include "netx/net/stream.hpp"
+#include "netx/websocket/handshake.hpp"
 #include <cassert>
 #include <utility>
 namespace netx
@@ -45,12 +46,12 @@ class Server : public net::details::Server<Server>
 		return *this;
 	}
 
-	// template <typename Handler>
-	// Server& ws(const std::string& path, Handler&& handler)
-	// {
-	// 	router_.route_ws(path, std::forward<Handler>(handler));
-	// 	return *this;
-	// }
+	template <typename Handler>
+	Server& ws(const std::string& path, Handler&& handler)
+	{
+		router_.route_ws(path, std::forward<Handler>(handler));
+		return *this;
+	}
 
   private:
 	core::Task<core::Expected<>> handle_client(int read_fd, int write_fd);
@@ -64,7 +65,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 {
 
 	auto stream_exp = net::details::Stream::create(read_fd, write_fd);
-	if (!stream_exp.has_value())
+	if (!stream_exp)
 	{
 		::close(read_fd);
 		::close(write_fd);
@@ -86,7 +87,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 			auto any_res =
 				co_await core::when_any(s.read(), core::sleep(timeout_));
 
-			if (!any_res.has_value())
+			if (!any_res)
 			{
 				co_return {};
 			}
@@ -127,30 +128,45 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
 					auto res_exp = co_await router_.dispatch(req);
 
-					// if (res.status_code() == 101)
-					// {
-					// 	std::string client_key =
-					// 		req->header("sec-websocket-key");
-					// 	std::string accept_key =
-					// 		ws::WSHandshake::generate_accept_key(client_key);
+					if (!res_exp)
+					{
+						const std::error_code& ec = res_exp.error();
+						elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
+						co_await s.write(
+							"HTTP/1.1 500 Internal Server Error\r\nConnection: "
+							"close\r\n\r\n");
+						s.shutdown();
+						co_return {};
+					}
 
-					// 	res.header("Upgrade", "websocket")
-					// 		.header("Connection", "Upgrade")
-					// 		.header("Sec-WebSocket-Accept", accept_key);
+					Response res = std::move(res_exp.value());
+					if (res.status_code == 101)
+					{
+						std::string client_key =
+							req.header("sec-websocket-key");
+						std::string accept_key = websocket::details::
+							WSHandshake::generate_accept_key(client_key);
 
-					// 	co_await HttpSender::send(&s, &res);
+						res.with_header("Upgrade", "websocket")
+							.with_header("Connection", "Upgrade")
+							.with_header("Sec-WebSocket-Accept", accept_key);
 
-					// 	auto ws_handler = router_.get_ws_handler(req->path);
-					// 	if (ws_handler)
-					// 	{
-					// 		ws::WSConnection ws_conn(&s);
-					// 		co_await ws_handler(&ws_conn); // 进入长连接处理循环
-					// 	}
-					// 	co_return;
-					// }
+						if (auto exp = co_await details::Sender::send(s, res);
+							!exp)
+						{
+							const std::error_code& ec = exp.error();
+							elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
+							co_return {};
+						}
 
-					Response res = res_exp ? std::move(res_exp.value())
-										   : Response{}.with_status(500);
+						auto ws_handler = router_.get_ws_handler(req.url_path);
+						if (ws_handler)
+						{
+							websocket::details::Connection ws_conn(s);
+							co_await ws_handler(ws_conn); // 进入长连接处理循环
+						}
+						co_return {};
+					}
 
 					bool is_keep = (req.header("connection") != "close");
 					if (req.version == "HTTP/1.0" &&
@@ -163,6 +179,11 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					auto send_res = co_await details::Sender::send(s, res);
 					if (!send_res || !is_keep)
 					{
+						if (!send_res)
+						{
+							const std::error_code& ec = send_res.error();
+							elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
+						}
 						s.shutdown();
 						co_return {};
 					}

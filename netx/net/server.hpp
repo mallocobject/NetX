@@ -48,7 +48,7 @@ template <typename Derived> struct Server
 
 		auto check = [&](auto&& exp) -> bool
 		{
-			if (!exp.has_value())
+			if (!exp)
 			{
 				sticky_error_ = exp.error();
 				elog::LOG_ERROR("Listen failed at {}: {}, {}",
@@ -165,7 +165,7 @@ template <typename Derived> void Server<Derived>::start()
 			[this, &start_latch]
 			{
 				auto exp = Scheduler::create();
-				if (!exp.has_value())
+				if (!exp)
 				{
 					const std::error_code& ec = exp.error();
 					elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
@@ -199,7 +199,7 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 
 	while (true)
 	{
-		if (auto exp = co_await ev_awaiter; !exp.has_value())
+		if (auto exp = co_await ev_awaiter; !exp)
 		{
 			const std::error_code& ec = exp.error();
 			elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
@@ -210,7 +210,7 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 		{
 			Address addr;
 			auto exp = Socket::accept(listen_fd, &addr);
-			if (!exp.has_value())
+			if (!exp)
 			{
 				switch (errno)
 				{
@@ -230,8 +230,7 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 					Socket::close(idle_fd_[0]);
 					Socket::close(idle_fd_[1]);
 
-					if (auto exp2 = Socket::accept(listen_fd, &addr);
-						exp2.has_value())
+					if (auto exp2 = Socket::accept(listen_fd, &addr); exp2)
 					{
 						Socket::close(exp2.value());
 					}

@@ -138,7 +138,7 @@ Task<Expected<std::variant<NonVoidRetType<Ts>...>>> when_any_impl(
 	bool is_failed = false;
 
 	((ctl.winner == Is
-		  ? (!std::get<Is>(results).has_value()
+		  ? (!std::get<Is>(results)
 				 ? (winner_ec = std::get<Is>(results).error(), is_failed = true)
 				 : false)
 		  : false),

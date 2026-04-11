@@ -44,7 +44,7 @@ struct EventLoop
 			auto res = registered ? poller.modify_event(event)
 								  : poller.register_event(event);
 
-			if (res.has_value())
+			if (res)
 			{
 				registered = true;
 				exp = std::move(res);
@@ -216,7 +216,7 @@ inline void EventLoop::run_once()
 	}
 
 	auto exp = poller.poll(timeout.has_value() ? timeout.value().count() : -1);
-	if (!exp.has_value())
+	if (!exp)
 	{
 		const std::error_code& ec = exp.error();
 		elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
