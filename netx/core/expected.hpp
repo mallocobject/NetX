@@ -12,6 +12,12 @@ template <typename T = void> struct Expected
 	// using ValueType = T;
 
 	Expected() = default;
+	Expected(const T& value) : exp_(value)
+	{
+	}
+	Expected(T&& value) : exp_(std::move(value))
+	{
+	}
 	Expected(tl::expected<T, std::error_code> e) : exp_(std::move(e))
 	{
 	}

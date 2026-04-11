@@ -1,7 +1,9 @@
 #pragma once
 
 #include "netx/core/check_error.hpp"
+#include "netx/core/error.hpp"
 #include "netx/core/event.hpp"
+#include "netx/core/expected.hpp"
 #include "netx/core/handle.hpp"
 #include <cassert>
 #include <cerrno>
@@ -33,32 +35,50 @@ struct EpollPoller
 		return registered_event_count_ <= 1;
 	}
 
-	void register_event(const Event& event)
+	Expected<> register_event(const Event& event)
 	{
 		epoll_event ev{.events = event.flags | EPOLLONESHOT,
 					   .data{.ptr = const_cast<HandleInfo*>(&event.info)}};
-		check_error<>(epoll_ctl(epfd, EPOLL_CTL_ADD, event.fd, &ev));
+		int ret = epoll_ctl(epfd, EPOLL_CTL_ADD, event.fd, &ev);
+		if (ret == -1)
+		{
+			return from_errno(errno);
+		}
 		registered_event_count_++;
 		if (evs_.size() < registered_event_count_)
 		{
 			evs_.resize(evs_.size() * 2);
 		}
+
+		return {};
 	}
 
-	void modify_event(const Event& event)
+	Expected<> modify_event(const Event& event)
 	{
 		epoll_event ev{.events = event.flags | EPOLLONESHOT,
 					   .data{.ptr = const_cast<HandleInfo*>(&event.info)}};
-		check_error<>(epoll_ctl(epfd, EPOLL_CTL_MOD, event.fd, &ev));
+		int ret = epoll_ctl(epfd, EPOLL_CTL_MOD, event.fd, &ev);
+		if (ret == -1)
+		{
+			return from_errno(errno);
+		}
+
+		return {};
 	}
 
-	void unregister_event(const Event& event)
+	Expected<> unregister_event(const Event& event)
 	{
-		check_error<>(epoll_ctl(epfd, EPOLL_CTL_DEL, event.fd, nullptr));
+		int ret = epoll_ctl(epfd, EPOLL_CTL_DEL, event.fd, nullptr);
+		if (ret == -1)
+		{
+			return from_errno(errno);
+		}
 		registered_event_count_--;
+
+		return {};
 	}
 
-	std::vector<Event> poll(int timeout)
+	Expected<std::vector<Event>> poll(int timeout)
 	{
 		int nevs = epoll_wait(epfd, evs_.data(), static_cast<int>(evs_.size()),
 							  timeout);
@@ -69,10 +89,12 @@ struct EpollPoller
 				return {};
 			}
 			check_error<>(nevs);
+			return from_errno(errno);
 		}
 
 		if (nevs == 0)
 		{
+			// return {Error::Timeout};
 			return {};
 		}
 

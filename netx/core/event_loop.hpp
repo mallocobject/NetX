@@ -1,8 +1,10 @@
 #pragma once
 
+#include "elog/logger.hpp"
 #include "netx/core/concepts.hpp"
 #include "netx/core/epoll_poller.hpp"
 #include "netx/core/event.hpp"
+#include "netx/core/expected.hpp"
 #include "netx/core/handle.hpp"
 #include <algorithm>
 #include <chrono>
@@ -23,38 +25,74 @@ struct EventLoop
 {
 	struct EventAwaiter
 	{
+		explicit EventAwaiter(EpollPoller& poller, const Event& event)
+			: poller(poller), event(event)
+		{
+		}
+
 		bool await_ready() const noexcept
 		{
 			return false;
 		}
 
-		template <typename P> void await_suspend(std::coroutine_handle<P> coro)
+		template <typename P> bool await_suspend(std::coroutine_handle<P> coro)
 		{
-			const auto& promise = coro.promise();
+			auto& promise = coro.promise();
 			promise.state = Handle::State::kSuspend;
 			event.info = {promise.id, &promise};
 
-			if (!std::exchange(registered, true))
+			auto res = registered ? poller.modify_event(event)
+								  : poller.register_event(event);
+
+			if (res)
 			{
-				poller.register_event(event);
+				registered = true;
+				exp = std::move(res);
+				return true;
 			}
 			else
 			{
-				poller.modify_event(event);
+				promise.state = Handle::State::kUnscheduled;
+				exp = std::move(res);
+				return false;
 			}
 		}
 
-		void await_resume() noexcept
+		Expected<> await_resume() noexcept
 		{
 			event.info = {};
+			return exp;
 		}
 
-		void reset() noexcept
+		Expected<> reset() noexcept
 		{
 			if (std::exchange(registered, false))
 			{
-				poller.unregister_event(event);
+				return poller.unregister_event(event);
 			}
+
+			return {};
+		}
+
+		EventAwaiter(EventAwaiter&& other) noexcept
+			: poller(other.poller), event(other.event),
+			  registered(std::exchange(other.registered, false)),
+			  exp(std::move(other.exp))
+		{
+		}
+
+		EventAwaiter& operator=(EventAwaiter&& other) noexcept
+		{
+			if (this == &other)
+			{
+				return *this;
+			}
+
+			reset();
+			event = other.event;
+			registered = std::exchange(other.registered, false);
+			exp = std::move(other.exp);
+			return *this;
 		}
 
 		~EventAwaiter()
@@ -65,6 +103,7 @@ struct EventLoop
 		EpollPoller& poller;
 		Event event{};
 		bool registered{false};
+		Expected<> exp;
 	};
 
 	using Clock = std::chrono::steady_clock;
@@ -179,8 +218,14 @@ inline void EventLoop::run_once()
 		timeout.emplace(std::max(duration_ms, ms::zero()));
 	}
 
-	auto events =
-		poller.poll(timeout.has_value() ? timeout.value().count() : -1);
+	auto exp = poller.poll(timeout.has_value() ? timeout.value().count() : -1);
+	if (!exp.has_value())
+	{
+		const std::error_code& ec = exp.error();
+		elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
+		return;
+	}
+	auto events = exp.value();
 	for (auto& event : events)
 	{
 		if (event.info.handle)
