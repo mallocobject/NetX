@@ -84,16 +84,11 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 				co_return {};
 			}
 
-			auto any_res =
-				co_await core::when_any(s.read(), core::sleep(timeout_));
+			auto var =
+				(co_await core::when_any(s.read(), core::sleep(timeout_)))
+					.value();
 
-			if (!any_res)
-			{
-				co_return {};
-			}
-
-			auto& val = any_res.value();
-			if (val.index() == 1)
+			if (var.index() == 1)
 			{
 				co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection: "
 								 "close\r\n\r\n");
@@ -101,7 +96,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 				co_return {};
 			}
 
-			auto& read_exp = std::get<0>(val);
+			auto& read_exp = std::get<0>(var);
 			if (!read_exp)
 			{
 				if (read_exp.error() != core::details::Error::BrokenPipe)

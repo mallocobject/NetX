@@ -1,7 +1,6 @@
 #pragma once
 
 #include "netx/core/concepts.hpp"
-#include "netx/core/error.hpp"
 #include "netx/core/event_loop.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
@@ -45,14 +44,14 @@ Task<Expected<>> sleep(details::NoWaitAtInitialSuspend,
 					   std::chrono::duration<Rep, Period>&& duration)
 {
 	co_await details::SleepAwaiter{std::move(duration)};
-	co_return details::Error::Timeout;
+	co_return {};
 }
 
 template <typename Rep, typename Period>
 Task<Expected<>> sleep(std::chrono::duration<Rep, Period> duration)
 {
-	co_return co_await sleep(details::no_wait_at_initial_suspend,
-							 std::move(duration));
+	co_await sleep(details::no_wait_at_initial_suspend, std::move(duration));
+	co_return {};
 }
 } // namespace core
 } // namespace netx

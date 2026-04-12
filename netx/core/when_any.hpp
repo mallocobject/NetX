@@ -134,21 +134,6 @@ Task<Expected<std::variant<NonVoidRetType<Ts>...>>> when_any_impl(
 
 	co_await WhenAnyAwaiter{ctl};
 
-	std::error_code winner_ec;
-	bool is_failed = false;
-
-	((ctl.winner == Is
-		  ? (!std::get<Is>(results)
-				 ? (winner_ec = std::get<Is>(results).error(), is_failed = true)
-				 : false)
-		  : false),
-	 ...);
-
-	if (is_failed)
-	{
-		co_return winner_ec;
-	}
-
 	using VariantType = std::variant<NonVoidRetType<Ts>...>;
 	VariantType out;
 
