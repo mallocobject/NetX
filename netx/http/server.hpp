@@ -79,21 +79,17 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 	{
 		while (true)
 		{
-			if (s.write_fd == -1)
-			{
-				co_return {};
-			}
-
 			auto var =
 				(co_await core::when_any(s.read(), core::sleep(timeout_)))
 					.value();
 
 			if (var.index() == 1)
 			{
+				elog::LOG_DEBUG("Connection idle timeout, closing fd {}",
+								s.read_fd);
 				co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection: "
 								 "close\r\n\r\n");
-				s.shutdown();
-				co_return {};
+				break;
 			}
 
 			auto& read_exp = std::get<0>(var);
@@ -104,17 +100,18 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					elog::LOG_DEBUG("Client read error: {}",
 									read_exp.error().message());
 				}
-				co_return {};
+				break;
 			}
 
+			bool should_close = false;
 			while (s.read_buf.readable_bytes() > 0)
 			{
 				if (!session.parse(s.read_buf))
 				{
 					co_await s.write("HTTP/1.1 400 Bad Request\r\nConnection: "
 									 "close\r\n\r\n");
-					s.shutdown();
-					co_return {};
+					should_close = true;
+					break;
 				}
 
 				if (session.completed())
@@ -130,8 +127,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 						co_await s.write(
 							"HTTP/1.1 500 Internal Server Error\r\nConnection: "
 							"close\r\n\r\n");
-						s.shutdown();
-						co_return {};
+						should_close = true;
+						break;
 					}
 
 					Response res = std::move(res_exp.value());
@@ -149,9 +146,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 						if (auto exp = co_await details::Sender::send(s, res);
 							!exp)
 						{
-							const std::error_code& ec = exp.error();
-							elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
-							co_return {};
+							break;
 						}
 
 						auto ws_handler = router_.get_ws_handler(req.url_path);
@@ -174,13 +169,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					auto send_res = co_await details::Sender::send(s, res);
 					if (!send_res || !is_keep)
 					{
-						if (!send_res)
-						{
-							const std::error_code& ec = send_res.error();
-							elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
-						}
-						s.shutdown();
-						co_return {};
+						should_close = true;
+						break;
 					}
 
 					session.clear();
@@ -191,6 +181,10 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					break;
 				}
 			}
+			if (should_close)
+			{
+				break;
+			}
 		}
 	}
 	catch (const std::exception& e)
@@ -198,6 +192,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 		elog::LOG_ERROR("Exception in handleClient: {}", e.what());
 	}
 
+	s.shutdown();
 	co_return {};
 }
 } // namespace http
