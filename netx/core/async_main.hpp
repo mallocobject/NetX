@@ -2,7 +2,7 @@
 
 #include "netx/core/concepts.hpp"
 #include "netx/core/event_loop.hpp"
-#include "netx/core/scheduled_task.hpp"
+#include "netx/core/wrapped_task.hpp"
 #include <utility>
 namespace netx
 {
@@ -15,7 +15,7 @@ inline void async_main()
 
 template <details::Future Fut> decltype(auto) async_main(Fut&& fut)
 {
-	auto tmp = details::ScheduledTask{std::move(fut)};
+	auto tmp = details::WrappedTask{std::move(fut)};
 	async_main();
 	return std::move(tmp).result();
 }

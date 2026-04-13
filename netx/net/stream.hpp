@@ -20,7 +20,7 @@ namespace details
 {
 struct Stream
 {
-	inline static constexpr size_t kChunkSize = 4 * 1024;
+	inline static constexpr size_t kChunkSize = 128 * 1024;
 
 	static core::Expected<Stream> create(int fd)
 	{

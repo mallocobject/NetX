@@ -6,6 +6,8 @@
 #include "netx/http/request.hpp"
 #include "netx/http/response.hpp"
 #include "netx/websocket/connection.hpp"
+#include <concepts>
+#include <type_traits>
 namespace netx
 {
 namespace http
@@ -20,6 +22,9 @@ using WsHandler = std::function<core::Task<core::Expected<>>(
 struct Router
 {
 	template <typename Handler>
+		requires std::invocable<Handler, Request&> &&
+				 std::same_as<std::invoke_result_t<Handler, Request&>,
+							  core::Task<core::Expected<Response>>>
 	void route(const std::string& method, const std::string& path,
 			   Handler&& handler)
 	{
@@ -27,6 +32,9 @@ struct Router
 	}
 
 	template <typename Handler>
+		requires std::invocable<Handler> &&
+				 std::same_as<std::invoke_result_t<Handler>,
+							  core::Task<core::Expected<>>>
 	void route_ws(const std::string& path, Handler&& handler)
 	{
 		route("GET", path,

@@ -10,9 +10,9 @@ namespace core
 {
 namespace details
 {
-template <Future TaskT> struct ScheduledTask
+template <Future TaskT> struct WrappedTask
 {
-	using TaskList = std::list<ScheduledTask>;
+	using TaskList = std::list<WrappedTask>;
 	using TaskListIter = TaskList::iterator;
 
 	struct DeleteNodeHandle : CoroHandle
@@ -34,8 +34,8 @@ template <Future TaskT> struct ScheduledTask
 		TaskListIter iter;
 	};
 
-	ScheduledTask() = default;
-	explicit ScheduledTask(TaskT&& task) noexcept : task_(std::move(task))
+	WrappedTask() = default;
+	explicit WrappedTask(TaskT&& task) noexcept : task_(std::move(task))
 	{
 		if (task_.valid() && !task_.done())
 		{
@@ -43,7 +43,7 @@ template <Future TaskT> struct ScheduledTask
 		}
 	}
 
-	ScheduledTask(TaskT&& task, TaskList& owner, TaskListIter iter) noexcept
+	WrappedTask(TaskT&& task, TaskList& owner, TaskListIter iter) noexcept
 		: task_(std::move(task))
 	{
 		if (task_.valid())
@@ -64,12 +64,11 @@ template <Future TaskT> struct ScheduledTask
 		}
 	}
 
-	ScheduledTask(ScheduledTask&& other) noexcept
-		: task_(std::move(other.task_))
+	WrappedTask(WrappedTask&& other) noexcept : task_(std::move(other.task_))
 	{
 	}
 
-	ScheduledTask& operator=(ScheduledTask&& other) noexcept
+	WrappedTask& operator=(WrappedTask&& other) noexcept
 	{
 		if (this == &other)
 		{
@@ -122,9 +121,9 @@ template <Future TaskT> struct ScheduledTask
 
 template <details::Future Fut>
 [[nodiscard("discard(detached) a task will not be scheduled to run")]]
-details::ScheduledTask<Fut> co_spawn(Fut&& fut)
+details::WrappedTask<Fut> co_spawn(Fut&& fut)
 {
-	return details::ScheduledTask<Fut>{std::move(fut)};
+	return details::WrappedTask<Fut>{std::move(fut)};
 }
 } // namespace core
 } // namespace netx

@@ -1,7 +1,7 @@
-#include "netx/core/scheduled_task.hpp"
 #include "elog/logger.hpp"
 #include "netx/core/event_loop.hpp"
 #include "netx/core/task.hpp"
+#include "netx/core/wrapped_task.hpp"
 
 using namespace netx::core;
 

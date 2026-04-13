@@ -88,7 +88,7 @@ struct EpollPoller
 			{
 				return {};
 			}
-			check_error<>(nevs);
+			// check_error<>(nevs);
 			return from_errno(errno);
 		}
 

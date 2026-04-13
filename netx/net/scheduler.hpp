@@ -3,8 +3,8 @@
 #include "elog/logger.hpp"
 #include "netx/core/error.hpp"
 #include "netx/core/expected.hpp"
-#include "netx/core/scheduled_task.hpp"
 #include "netx/core/task.hpp"
+#include "netx/core/wrapped_task.hpp"
 #include "netx/net/lock_free_queue.hpp"
 #include <cerrno>
 #include <cstddef>
@@ -69,7 +69,7 @@ struct Scheduler
 
   private:
 	LockFreeQueue<core::Task<core::Expected<>>> task_queue_;
-	std::list<core::details::ScheduledTask<core::Task<core::Expected<>>>> sts_;
+	std::list<core::details::WrappedTask<core::Task<core::Expected<>>>> sts_;
 
 	int wakeup_fd_{-1};
 	core::details::EventLoop::EventAwaiter wakeup_awaiter_;
@@ -156,7 +156,7 @@ inline core::Task<core::Expected<>> Scheduler::scheduler_loop(
 			sts_.emplace_back();
 			auto it = std::prev(sts_.end());
 
-			*it = core::details::ScheduledTask(std::move(tmp), sts_, it);
+			*it = core::details::WrappedTask(std::move(tmp), sts_, it);
 		}
 	}
 }
