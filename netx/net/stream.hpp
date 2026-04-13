@@ -174,7 +174,7 @@ inline core::Task<core::Expected<>> Stream::write(std::string_view data)
 		{
 			if (errno == EWOULDBLOCK || errno == EAGAIN)
 			{
-				co_await co_await read_awaiter_;
+				co_await co_await write_awaiter_;
 				continue;
 			}
 			co_return core::details::from_errno(errno);
