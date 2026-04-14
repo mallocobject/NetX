@@ -39,6 +39,9 @@ class Server : public net::details::Server<Server>
 	}
 
 	template <typename Handler>
+		requires std::invocable<Handler, Request&> &&
+				 std::same_as<std::invoke_result_t<Handler, Request&>,
+							  core::Task<core::Expected<Response>>>
 	Server& route(const std::string& method, const std::string& path,
 				  Handler&& handler)
 	{
@@ -47,9 +50,12 @@ class Server : public net::details::Server<Server>
 	}
 
 	template <typename Handler>
-	Server& ws(const std::string& path, Handler&& handler)
+		requires std::invocable<Handler> &&
+				 std::same_as<std::invoke_result_t<Handler>,
+							  core::Task<core::Expected<>>>
+	Server& route(const std::string& path, Handler&& handler)
 	{
-		router_.route_ws(path, std::forward<Handler>(handler));
+		router_.route(path, std::forward<Handler>(handler));
 		return *this;
 	}
 

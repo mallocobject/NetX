@@ -35,7 +35,7 @@ struct Router
 		requires std::invocable<Handler> &&
 				 std::same_as<std::invoke_result_t<Handler>,
 							  core::Task<core::Expected<>>>
-	void route_ws(const std::string& path, Handler&& handler)
+	void route(const std::string& path, Handler&& handler)
 	{
 		route("GET", path,
 			  [](Request& req) -> core::Task<core::Expected<Response>>
