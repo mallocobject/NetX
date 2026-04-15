@@ -1,5 +1,6 @@
 #pragma once
 
+#include "elog/logger.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
 #include "netx/http/response.hpp"
@@ -40,6 +41,7 @@ class Sender
 		int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
 		if (fd == -1)
 		{
+			elog::LOG_DEBUG("send_file: not found {}", path);
 			res.with_status(404).with_body("<h1>404 Not Found</h1>");
 			co_return co_await stream.write(res.to_formatted_string());
 		}
@@ -72,6 +74,7 @@ class Sender
 		::close(fd);
 		if (mapped == MAP_FAILED)
 		{
+			elog::LOG_ERROR("send_file: mmap failed {}", path);
 			co_return core::details::make_error_code(
 				core::details::Error::ResourceExhausted);
 		}
@@ -96,6 +99,15 @@ class Sender
 		}
 
 		::munmap(mapped, st.st_size);
+		if (!write_res)
+		{
+			elog::LOG_DEBUG("send_file write error: {}",
+							write_res.error().message());
+		}
+		else
+		{
+			elog::LOG_DEBUG("send_file done: {} size={}", path, size);
+		}
 		co_return write_res;
 	}
 };

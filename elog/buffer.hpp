@@ -3,19 +3,49 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <memory>
-#include <string>
+#include <string_view>
 #include <utility>
 namespace elog
 {
 namespace details
 {
-template <std::size_t N> struct Buffer
+struct LogBlock
 {
-	using iterator = std::string*;
-	using const_iterator = const std::string*;
+	constexpr static size_t kCap = 64 * 1024;
 
-	Buffer() : data_(std::make_unique<std::string[]>(N))
+	bool append(std::string_view s)
+	{
+		if (len + s.size() > kCap)
+		{
+			return false;
+		}
+		memcpy(data + len, s.data(), s.size());
+		len += s.size();
+		return true;
+	}
+
+	void clear() noexcept
+	{
+		len = 0;
+	}
+
+	bool empty() const noexcept
+	{
+		return len == 0;
+	}
+
+	size_t len{0};
+	char data[kCap];
+};
+
+template <size_t N> struct Buffer
+{
+	using iterator = LogBlock*;
+	using const_iterator = const LogBlock*;
+
+	Buffer() : data_(std::make_unique<LogBlock[]>(N))
 	{
 	}
 
@@ -37,7 +67,7 @@ template <std::size_t N> struct Buffer
 		return *this;
 	}
 
-	std::size_t size() const noexcept
+	size_t size() const noexcept
 	{
 		return idx_;
 	}
@@ -47,7 +77,7 @@ template <std::size_t N> struct Buffer
 		return data_ != nullptr;
 	}
 
-	std::size_t capacity() const noexcept
+	size_t capacity() const noexcept
 	{
 		return N;
 	}
@@ -67,16 +97,10 @@ template <std::size_t N> struct Buffer
 		idx_ = 0;
 	}
 
-	void push(const std::string& msg)
+	void push(std::string_view msg)
 	{
 		assert(data_);
-		data_[idx_++] = msg;
-	}
-
-	void push(std::string&& msg)
-	{
-		assert(data_);
-		data_[idx_++] = std::move(msg);
+		data_[idx_++].append(msg);
 	}
 
 	iterator begin() noexcept
@@ -98,8 +122,8 @@ template <std::size_t N> struct Buffer
 	}
 
   private:
-	std::unique_ptr<std::string[]> data_;
-	std::size_t idx_{0};
+	std::unique_ptr<LogBlock[]> data_;
+	size_t idx_{0};
 };
 } // namespace details
 } // namespace elog

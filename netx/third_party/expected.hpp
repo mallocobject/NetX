@@ -406,7 +406,7 @@ struct tag
 };
 
 template <class T> tag swap(T&, T&);
-template <class T, std::size_t N> tag swap(T (&a)[N], T (&b)[N]);
+template <class T, size_t N> tag swap(T (&a)[N], T (&b)[N]);
 
 // helper functions to test if an unqualified swap is possible, and if it
 // becomes std::swap
@@ -429,7 +429,7 @@ struct is_std_swap_noexcept
 {
 };
 
-template <class T, std::size_t N>
+template <class T, size_t N>
 struct is_std_swap_noexcept<T[N]> : is_std_swap_noexcept<T>
 {
 };
@@ -452,7 +452,7 @@ struct is_swappable
 {
 };
 
-template <class T, std::size_t N>
+template <class T, size_t N>
 struct is_swappable<T[N], T[N]>
 	: std::integral_constant<
 		  bool,

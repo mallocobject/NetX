@@ -54,7 +54,7 @@ struct Request
 
 	std::string body;
 	bool keep_alive{false};
-	std::size_t ctx_len{0};
+	size_t ctx_len{0};
 };
 } // namespace http
 } // namespace netx

@@ -124,7 +124,7 @@ RadixTree<T>::MatchResult RadixTree<T>::search(const std::string& path) const
 	}
 
 	auto segments = split(path);
-	for (std::size_t i = 0; i < segments.size(); ++i)
+	for (size_t i = 0; i < segments.size(); ++i)
 	{
 		auto seg = segments[i];
 
@@ -162,10 +162,10 @@ template <typename T>
 std::vector<std::string_view> RadixTree<T>::split(std::string_view path) const
 {
 	std::vector<std::string_view> segs;
-	std::size_t start = 0;
+	size_t start = 0;
 	while (true)
 	{
-		std::size_t end = path.find('/', start);
+		size_t end = path.find('/', start);
 		if (end == std::string::npos)
 		{
 			if (start < path.size())
@@ -197,12 +197,12 @@ std::string RadixTree<T>::normalize_path(const std::string& path)
 	}
 
 	std::deque<std::string_view> stk;
-	std::size_t start = 0;
-	for (std::size_t i = 0; i <= path.size(); i++)
+	size_t start = 0;
+	for (size_t i = 0; i <= path.size(); i++)
 	{
 		if (i == path.size() || path[i] == '/')
 		{
-			std::size_t seg_len = i - start;
+			size_t seg_len = i - start;
 			if (seg_len == 0)
 			{
 				start = i + 1;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "elog/logger.hpp"
 #include "netx/core/error.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/net/endian.hpp"
@@ -67,8 +68,8 @@ struct Buffer
 
 	size_t writable_bytes() const noexcept
 	{
-		assert(data_.size() >= rptr_);
-		return data_.size() - rptr_;
+		assert(data_.size() >= wptr_);
+		return data_.size() - wptr_;
 	}
 
 	size_t prependable_bytes() const noexcept
@@ -231,10 +232,13 @@ inline core::Expected<ssize_t> Buffer::read_fd(int fd)
 		{
 			return -1;
 		}
-		return core::details::from_errno(errno);
+		auto ec = core::details::from_errno(errno);
+		elog::LOG_DEBUG("Buffer read_fd error: {}", ec.message());
+		return ec;
 	}
 	else if (n == 0)
 	{
+		elog::LOG_DEBUG("Buffer read_fd: BrokenPipe");
 		return core::details::make_error_code(core::details::Error::BrokenPipe);
 	}
 
@@ -260,11 +264,13 @@ inline void Buffer::extend_space(size_t len)
 	// writableBytes + prependableBytes - kPrependSize < len
 	if (writable_bytes() + prependable_bytes() < len + kPrependSize)
 	{
+		elog::LOG_DEBUG("Buffer resize: old_size={} new_size={}", data_.size(), wptr_ + len);
 		data_.resize(wptr_ + len);
 	}
 	else
 	{
 		size_t readabel_bytes = readable_bytes();
+		elog::LOG_DEBUG("Buffer shift: rptr={} wptr={} readable={}", rptr_, wptr_, readabel_bytes);
 		std::copy(data_.data() + rptr_, data_.data() + wptr_,
 				  data_.data() + kPrependSize);
 

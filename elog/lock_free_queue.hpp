@@ -3,9 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <utility>
-namespace netx
-{
-namespace net
+namespace elog
 {
 namespace details
 {
@@ -158,5 +156,4 @@ template <typename T> bool LockFreeQueue<T>::pop(T& out)
 	}
 }
 } // namespace details
-} // namespace net
-} // namespace netx
+} // namespace elog

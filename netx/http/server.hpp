@@ -70,9 +70,11 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 														  int write_fd)
 {
 
+	elog::LOG_DEBUG("handle_client start fd={}", read_fd);
 	auto stream_exp = net::details::Stream::create(read_fd, write_fd);
 	if (!stream_exp)
 	{
+		elog::LOG_DEBUG("handle_client Stream::create failed fd={}", read_fd);
 		::close(read_fd);
 		::close(write_fd);
 		co_return {};
@@ -93,8 +95,12 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 			{
 				elog::LOG_DEBUG("Connection idle timeout, closing fd {}",
 								s.read_fd);
-				co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection: "
-								 "close\r\n\r\n");
+				// co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection:
+				// " 				 "close\r\n\r\n");
+				co_await s.write(Response{}
+									 .with_status(408)
+									 .keep_alive(false)
+									 .to_formatted_string());
 				break;
 			}
 
@@ -114,8 +120,12 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 			{
 				if (!session.parse(s.read_buf))
 				{
-					co_await s.write("HTTP/1.1 400 Bad Request\r\nConnection: "
-									 "close\r\n\r\n");
+					// co_await s.write("HTTP/1.1 400 Bad Request\r\nConnection:
+					// " 				 "close\r\n\r\n");
+					co_await s.write(Response{}
+										 .with_status(400)
+										 .keep_alive(false)
+										 .to_formatted_string());
 					should_close = true;
 					break;
 				}
@@ -130,9 +140,13 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 					{
 						const std::error_code& ec = res_exp.error();
 						elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
-						co_await s.write(
-							"HTTP/1.1 500 Internal Server Error\r\nConnection: "
-							"close\r\n\r\n");
+						// co_await s.write(
+						// 	"HTTP/1.1 500 Internal Server Error\r\nConnection: "
+						// 	"close\r\n\r\n");
+						co_await s.write(Response{}
+											 .with_status(500)
+											 .keep_alive(false)
+											 .to_formatted_string());
 						should_close = true;
 						break;
 					}
@@ -199,6 +213,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 	}
 
 	s.shutdown();
+	elog::LOG_DEBUG("handle_client end fd={}", read_fd);
 	co_return {};
 }
 } // namespace http

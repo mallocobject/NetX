@@ -31,7 +31,7 @@ struct FileAppender
 		}
 	}
 
-	std::size_t written_bytes() const noexcept
+	size_t written_bytes() const noexcept
 	{
 		return written_bytes_;
 	}
@@ -46,7 +46,7 @@ struct FileAppender
 		append(data.data(), data.size());
 	}
 
-	void append(const char* data, std::size_t len);
+	void append(const char* data, size_t len);
 
 	void flush();
 
@@ -59,7 +59,7 @@ struct FileAppender
 	size_t written_bytes_{0};
 };
 
-inline void FileAppender::append(const char* data, std::size_t len)
+inline void FileAppender::append(const char* data, size_t len)
 {
 	if (!data || !file_ || len == 0)
 	{

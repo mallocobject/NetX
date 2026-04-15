@@ -124,10 +124,9 @@ inline void output_log(LogLevel lv, std::string&& msg,
 }
 } // namespace details
 
-inline void set_log_path(std::string dir, std::string prefix,
-						 std::size_t roll_size,
+inline void set_log_path(std::string dir, std::string prefix, size_t roll_size,
 						 std::chrono::seconds flush_interval,
-						 std::size_t check_per_count)
+						 size_t check_per_count)
 {
 	details::g_log_file = std::make_unique<details::AsyncLogger>(
 		dir, prefix, roll_size, flush_interval, check_per_count);

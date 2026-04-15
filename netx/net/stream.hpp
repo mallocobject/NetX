@@ -1,5 +1,6 @@
 #pragma once
 
+#include "elog/logger.hpp"
 #include "netx/core/event.hpp"
 #include "netx/core/event_loop.hpp"
 #include "netx/core/expected.hpp"
@@ -170,6 +171,12 @@ inline core::Task<core::Expected<>> Stream::write(std::string_view data)
 		{
 			write_buf.retrieve(n);
 		}
+		else if (n == 0) [[unlikely]]
+		{
+			elog::LOG_DEBUG("Stream write: BrokenPipe on fd={}", write_fd);
+			co_return core::details::make_error_code(
+				core::details::Error::BrokenPipe);
+		}
 		else if (n < 0)
 		{
 			if (errno == EWOULDBLOCK || errno == EAGAIN)
@@ -177,7 +184,9 @@ inline core::Task<core::Expected<>> Stream::write(std::string_view data)
 				co_await co_await write_awaiter_;
 				continue;
 			}
-			co_return core::details::from_errno(errno);
+			auto ec = core::details::from_errno(errno);
+			elog::LOG_DEBUG("Stream write error on fd={}: {}", write_fd, ec.message());
+			co_return ec;
 		}
 	}
 

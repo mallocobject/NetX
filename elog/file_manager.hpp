@@ -18,9 +18,9 @@ struct FileManager
 
 	explicit FileManager(
 		std::string dir, std::string prefix,
-		std::size_t roll_size = 100 * 1024 * 1024,
+		size_t roll_size = 100 * 1024 * 1024,
 		std::chrono::seconds flush_interval = std::chrono::seconds(3),
-		std::size_t check_per_count = 1024)
+		size_t check_per_count = 1024)
 		: dir_(std::move(dir)), prefix_(std::move(prefix)),
 		  roll_size_(roll_size), flush_interval_(flush_interval),
 		  check_per_count_(check_per_count)
@@ -33,7 +33,7 @@ struct FileManager
 		append(data.data(), data.size());
 	}
 
-	void append(const char* data, std::size_t len);
+	void append(const char* data, size_t len);
 
 	void flush()
 	{
@@ -47,9 +47,9 @@ struct FileManager
   private:
 	const std::string dir_;
 	const std::string prefix_;
-	const std::size_t roll_size_;
+	const size_t roll_size_;
 	const std::chrono::seconds flush_interval_;
-	const std::size_t check_per_count_;
+	const size_t check_per_count_;
 	int count_;
 
 	std::unique_ptr<FileAppender> file_;
@@ -62,7 +62,7 @@ struct FileManager
 		last_flush_second_;
 };
 
-inline void FileManager::append(const char* data, std::size_t len)
+inline void FileManager::append(const char* data, size_t len)
 {
 	file_->append(data, len);
 	if (file_->written_bytes() > roll_size_)

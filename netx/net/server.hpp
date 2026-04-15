@@ -210,6 +210,7 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 		{
 			Address addr;
 			auto exp = Socket::accept(listen_fd, &addr);
+
 			if (!exp)
 			{
 				switch (errno)
@@ -249,14 +250,19 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 			}
 
 			int conn_fd = exp.value();
+			elog::LOG_DEBUG("Accepted fd={} addr={} -> worker {}", conn_fd,
+							addr.to_formatted_string(),
+							lucky_boy % schedulers_.size());
+
 			int dup_conn_fd = dup(conn_fd);
 			if (dup_conn_fd < 0)
 			{
 				auto ec = core::details::from_errno(errno);
 				Socket::close(dup_conn_fd);
 
-				elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
-				break;
+				elog::LOG_ERROR("dup failed for fd={}: {}", conn_fd,
+								ec.message());
+				continue;
 			}
 
 			int opt = 1;

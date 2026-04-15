@@ -3,33 +3,36 @@
 
 #include "elog/buffer.hpp"
 #include "elog/file_manager.hpp"
+#include "lock_free_queue.hpp"
 #include <atomic>
-#include <cassert>
 #include <chrono>
-#include <condition_variable>
-#include <cstddef>
 #include <latch>
 #include <mutex>
-#include <string>
+#include <string_view>
 #include <thread>
-#include <utility>
 #include <vector>
+
 namespace elog
 {
 namespace details
 {
+
+using BlockQueue = LockFreeQueue<LogBlock*>;
+
+struct ProducerCtx
+{
+	LogBlock* cur{new LogBlock()};
+	BlockQueue full_queue; // producer push, consumer pop
+	BlockQueue free_queue; // consumer push, producer pop
+};
+
 struct AsyncLogger
 {
-	inline constexpr static std::size_t kSmallBuffer = 4096;
-	inline constexpr static std::size_t kLargeBuffer = 65536;
-
-	using LoggerBuffer = Buffer<kLargeBuffer>;
-
 	explicit AsyncLogger(
 		const std::string& dir, const std::string& prefix,
-		std::size_t roll_size = 100 * 1024 * 1024,
+		size_t roll_size = 100 * 1024 * 1024,
 		std::chrono::seconds flush_interval = std::chrono::seconds(3),
-		std::size_t check_per_count = 1024)
+		size_t check_per_count = 1024)
 	{
 		std::latch start_latch{1};
 		thread_ = std::jthread(
@@ -41,177 +44,171 @@ struct AsyncLogger
 	}
 
 	AsyncLogger(AsyncLogger&&) = delete;
+
 	~AsyncLogger()
 	{
-		if (done_.load(std::memory_order_acquire))
+		if (!done_.load(std::memory_order_acquire))
 		{
-			return;
+			do_done();
 		}
-		do_done();
 	}
 
-	void append_message(const std::string& msg);
+	void append_message(std::string_view msg);
 
 	void wait_for_done()
 	{
-		if (done_.load(std::memory_order_acquire))
+		if (!done_.load(std::memory_order_acquire))
 		{
-			return;
+			do_done();
 		}
-		do_done();
 	}
 
   private:
+	ProducerCtx* register_producer();
+
 	void run(const std::string& dir, const std::string& prefix,
-			 std::size_t roll_size, std::chrono::seconds flush_interval,
-			 std::size_t check_per_count, std::latch& start_latch);
+			 size_t roll_size, std::chrono::seconds flush_interval,
+			 size_t check_per_count, std::latch& start_latch);
 
 	void do_done()
 	{
 		done_.store(true, std::memory_order_release);
-		cv_.notify_one();
-
+		pending_.fetch_add(1, std::memory_order_release);
+		pending_.notify_one();
 		if (thread_.joinable())
 		{
 			thread_.join();
 		}
+
+		// consumer 已退出，安全清理所有 ctx
+		for (auto* ctx : producers_)
+		{
+			delete ctx;
+		}
+		producers_.clear();
 	}
 
   private:
 	std::atomic<bool> done_{false};
-	std::mutex mtx_;
-	std::condition_variable cv_;
+	std::atomic<uint32_t> pending_{0};
+
+	std::mutex reg_mtx_;
+	std::vector<ProducerCtx*> producers_;
 
 	std::jthread thread_;
-
-	LoggerBuffer cur_buf_{};
-	LoggerBuffer next_buf_{};
-
-	std::vector<LoggerBuffer> bufs_;
 };
 
-inline void AsyncLogger::append_message(const std::string& msg)
+inline ProducerCtx* AsyncLogger::register_producer()
+{
+	auto* ctx = new ProducerCtx();
+	std::lock_guard lock(reg_mtx_);
+	producers_.push_back(ctx);
+	return ctx;
+}
+
+inline void AsyncLogger::append_message(std::string_view msg)
 {
 	if (done_.load(std::memory_order_acquire))
 	{
 		return;
 	}
 
-	{
-		std::lock_guard<std::mutex> lock(mtx_);
-		if (!cur_buf_.full())
-		{
-			cur_buf_.push(msg);
-			return;
-		}
+	thread_local ProducerCtx* ctx = register_producer();
+	thread_local uint32_t count = 0;
 
-		bufs_.push_back(std::move(cur_buf_));
-		if (next_buf_.check())
+	bool need_write = !ctx->cur->append(msg);
+
+	if (need_write || ++count >= 256)
+	{
+		count = 0;
+		ctx->full_queue.push(ctx->cur);
+
+		LogBlock* free_blk = nullptr;
+		if (ctx->free_queue.pop(free_blk))
 		{
-			cur_buf_ = std::move(next_buf_);
+			free_blk->clear();
+			ctx->cur = free_blk;
 		}
 		else
 		{
-			cur_buf_ = LoggerBuffer();
+			ctx->cur = new LogBlock();
 		}
 
-		cur_buf_.push(msg);
+		if (need_write)
+		{
+			ctx->cur->append(msg);
+		}
+
+		if (pending_.fetch_add(1, std::memory_order_release) == 0)
+		{
+			pending_.notify_one();
+		}
 	}
-	cv_.notify_one();
 }
 
 inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
-							 std::size_t roll_size,
+							 size_t roll_size,
 							 std::chrono::seconds flush_interval,
-							 std::size_t check_per_count,
-							 std::latch& start_latch)
+							 size_t check_per_count, std::latch& start_latch)
 {
 	FileManager out_file(dir, prefix, roll_size, flush_interval,
 						 check_per_count);
+	start_latch.count_down();
 
-	LoggerBuffer new_buf1{};
-	LoggerBuffer new_buf2{};
-
-	std::vector<LoggerBuffer> bufs_to_write;
-	bufs_to_write.reserve(16);
-
-	while (!done_.load(std::memory_order_acquire))
+	while (true)
 	{
+		uint32_t n = pending_.load(std::memory_order_acquire);
+		if (n == 0 && !done_.load(std::memory_order_acquire))
+			pending_.wait(0);
+
+		pending_.store(0, std::memory_order_release);
+
+		std::vector<ProducerCtx*> snapshot;
 		{
-			std::unique_lock<std::mutex> lock(mtx_);
-			if (bufs_.empty())
+			std::lock_guard lock(reg_mtx_);
+			snapshot = producers_;
+		}
+
+		bool any = false;
+		for (auto* ctx : snapshot)
+		{
+			LogBlock* blk = nullptr;
+			while (ctx->full_queue.pop(blk))
 			{
-				bool initialized = [&start_latch]
+				out_file.append(blk->data, blk->len);
+				ctx->free_queue.push(blk);
+				any = true;
+			}
+		}
+
+		if (any)
+		{
+			out_file.flush();
+		}
+
+		if (done_.load(std::memory_order_acquire))
+		{
+			// 最后一次：drain full_queue + cur 残留
+			// 此时所有生产者线程已 join，cur 不会再被写入，安全访问
+			for (auto* ctx : snapshot)
+			{
+				LogBlock* blk = nullptr;
+				while (ctx->full_queue.pop(blk))
 				{
-					start_latch.count_down();
-					return true;
-				}();
-
-				cv_.wait_for(lock, std::chrono::seconds(flush_interval));
+					out_file.append(blk->data, blk->len);
+				}
+				if (!ctx->cur->empty())
+				{
+					out_file.append(ctx->cur->data, ctx->cur->len);
+				}
 			}
-
-			if (!cur_buf_.empty())
-			{
-				bufs_.push_back(std::move(cur_buf_));
-				cur_buf_ = std::move(new_buf1);
-			}
-
-			bufs_to_write.swap(bufs_);
-
-			if (!next_buf_.check())
-			{
-				next_buf_ = std::move(new_buf2);
-			}
+			break;
 		}
-
-		if (bufs_to_write.empty())
-		{
-			continue;
-		}
-
-		// 暂时禁用缓冲区数量限制，以便测试日志是否丢失
-		// if (bufs_to_write.size() > 100)
-		// {
-		// 	std::string err = std::format(
-		// 		"Dropped log messages at {}, {} larger LoggerBuffers\n",
-		// 		std::chrono::system_clock::now(), bufs_to_write.size() - 2);
-		// 	std::cerr << err;
-
-		// 	out_file.append(err.c_str(), err.size());
-		// 	bufs_to_write.erase(bufs_to_write.begin() + 2, bufs_to_write.end());
-		// }
-
-		for (const auto& buf : bufs_to_write)
-		{
-			for (const auto& msg : buf)
-			{
-				out_file.append(msg);
-			}
-		}
-
-		if (bufs_to_write.size() < 2)
-		{
-			bufs_to_write.resize(2);
-		}
-
-		if (!new_buf1.check())
-		{
-			new_buf1 = std::move(bufs_to_write[0]);
-			new_buf1.clear();
-		}
-
-		if (!new_buf2.check())
-		{
-			new_buf2 = std::move(bufs_to_write[1]);
-			new_buf2.clear();
-		}
-
-		bufs_to_write.clear();
-		out_file.flush();
 	}
 
 	out_file.flush();
 }
+
 } // namespace details
 } // namespace elog
 

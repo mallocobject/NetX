@@ -31,7 +31,7 @@ struct Parser
 		kError
 	};
 
-	std::size_t body_remaining() const noexcept
+	size_t body_remaining() const noexcept
 	{
 		assert(state == State::kBody);
 		return body_remaining_;
@@ -52,7 +52,7 @@ struct Parser
 		req.clear();
 	}
 
-	void append_body(const char* data, std::size_t len)
+	void append_body(const char* data, size_t len)
 	{
 		req.body.append(data, len);
 		body_remaining_ -= len;
@@ -83,7 +83,7 @@ struct Parser
   private:
 	std::string tmp_key_;
 	std::string tmp_value_;
-	std::size_t body_remaining_{0};
+	size_t body_remaining_{0};
 };
 
 inline bool Parser::consume(char c)
