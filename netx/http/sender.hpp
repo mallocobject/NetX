@@ -5,8 +5,14 @@
 #include "netx/core/task.hpp"
 #include "netx/http/response.hpp"
 #include "netx/net/stream.hpp"
+#include <cstddef>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <unordered_map>
+#include <utility>
 namespace netx
 {
 namespace http
@@ -37,11 +43,28 @@ class Sender
 	static core::Task<core::Expected<>> send_file(net::details::Stream& stream,
 												  Response& res)
 	{
-		const std::string& path = res.file;
-		int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+		static std::unordered_map<std::string,
+								  std::pair<std::shared_ptr<void>, size_t>>
+			file_set;
+		static std::shared_mutex file_set_mutex;
+
+		const std::string& file_path = res.file;
+
+		{
+			std::shared_lock lock(file_set_mutex);
+			if (auto it = file_set.find(file_path); it != file_set.end())
+			{
+				auto [ptr_holder, size] = it->second;
+				lock.unlock();
+				co_await co_await mmap_write(stream, res, ptr_holder, size);
+				co_return {};
+			}
+		}
+
+		int fd = ::open(file_path.c_str(), O_RDONLY | O_CLOEXEC);
 		if (fd == -1)
 		{
-			elog::LOG_DEBUG("send_file: not found {}", path);
+			elog::LOG_DEBUG("send_file: not found {}", file_path);
 			res.with_status(404).with_body("<h1>404 Not Found</h1>");
 			co_return co_await stream.write(res.to_formatted_string());
 		}
@@ -55,60 +78,62 @@ class Sender
 		}
 
 		size_t size = st.st_size;
-		res.with_status(200).with_header("Content-Length",
-										 std::to_string(size));
-
-		if (auto exp = co_await stream.write(res.to_formatted_string()); !exp)
-		{
-			::close(fd);
-			co_return exp.error();
-		}
-
-		if (size == 0)
-		{
-			::close(fd);
-			co_return {};
-		}
 
 		void* mapped = ::mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
 		::close(fd);
 		if (mapped == MAP_FAILED)
 		{
-			elog::LOG_ERROR("send_file: mmap failed {}", path);
+			elog::LOG_ERROR("send_file: mmap failed {}", file_path);
 			co_return core::details::make_error_code(
 				core::details::Error::ResourceExhausted);
 		}
 
-		const char* ptr = reinterpret_cast<const char*>(mapped);
-		size_t remaining = size;
-		core::Expected<> write_res{};
+		{
+			std::unique_lock<std::shared_mutex> lock(file_set_mutex);
+			if (!file_set.contains(file_path))
+			{
+				file_set.try_emplace(file_path,
+									 std::make_pair(std::shared_ptr<void>(
+														mapped, [size](void* p)
+														{ ::munmap(p, size); }),
+													size));
+			}
+			else
+			{
+				::munmap(mapped, size);
+			}
+		}
+
+		co_await co_await send_file(stream, res);
+		co_return {};
+	}
+
+	static core::Task<core::Expected<>> mmap_write(
+		net::details::Stream& stream, Response& res,
+		std::shared_ptr<void> ptr_holder, size_t total_size)
+	{
+		const char* ptr = reinterpret_cast<const char*>(ptr_holder.get());
+		size_t remaining = total_size;
+
+		res.with_status(200).with_header("Content-Length",
+										 std::to_string(remaining));
+
+		if (auto exp = co_await stream.write(res.to_formatted_string()); !exp)
+		{
+			co_return exp.error();
+		}
 
 		while (remaining > 0)
 		{
 			size_t to_send =
 				std::min(remaining, net::details::Stream::kChunkSize);
-			write_res = co_await stream.write(std::string_view(ptr, to_send));
-
-			if (!write_res)
-			{
-				break;
-			}
+			co_await co_await stream.write(std::string_view(ptr, to_send));
 
 			ptr += to_send;
 			remaining -= to_send;
 		}
 
-		::munmap(mapped, st.st_size);
-		if (!write_res)
-		{
-			elog::LOG_DEBUG("send_file write error: {}",
-							write_res.error().message());
-		}
-		else
-		{
-			elog::LOG_DEBUG("send_file done: {} size={}", path, size);
-		}
-		co_return write_res;
+		co_return {};
 	}
 };
 } // namespace details

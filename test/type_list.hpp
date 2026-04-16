@@ -100,11 +100,18 @@ struct Fold
 	using type = Init;
 };
 
+// template <typename Sum, template <typename, typename> typename Op, typename
+// H, 		  typename... Ts> struct Fold<TypeList<H, Ts...>, Sum, Op> 	:
+// Fold<TypeList<Ts...>, typename Op<Sum, H>::type, Op>
+// {
+// };
+
 template <typename Sum, template <typename, typename> typename Op, typename H,
 		  typename... Ts>
 struct Fold<TypeList<H, Ts...>, Sum, Op>
-	: Fold<TypeList<Ts...>, typename Op<Sum, H>::type, Op>
 {
+	using type =
+		typename Fold<TypeList<Ts...>, typename Op<Sum, H>::type, Op>::type;
 };
 
 template <TL In, typename Init, template <typename, typename> typename Op>

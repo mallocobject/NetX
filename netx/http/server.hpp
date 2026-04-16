@@ -1,5 +1,6 @@
 #pragma once
 
+#include "elog/logger.hpp"
 #include "netx/core/error.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/core/sleep.hpp"
@@ -166,6 +167,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 						if (auto exp = co_await details::Sender::send(s, res);
 							!exp)
 						{
+							const std::error_code& ec = res_exp.error();
+							elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
 							break;
 						}
 

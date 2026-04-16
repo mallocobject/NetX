@@ -1,8 +1,8 @@
 #ifndef ELOG_ASYNC_LOGGER_HPP
 #define ELOG_ASYNC_LOGGER_HPP
 
-#include "elog/buffer.hpp"
 #include "elog/file_manager.hpp"
+#include "elog/log_block.hpp"
 #include "lock_free_queue.hpp"
 #include <atomic>
 #include <chrono>
@@ -114,13 +114,11 @@ inline void AsyncLogger::append_message(std::string_view msg)
 	}
 
 	thread_local ProducerCtx* ctx = register_producer();
-	thread_local uint32_t count = 0;
 
 	bool need_write = !ctx->cur->append(msg);
 
-	if (need_write || ++count >= 256)
+	if (need_write)
 	{
-		count = 0;
 		ctx->full_queue.push(ctx->cur);
 
 		LogBlock* free_blk = nullptr;
