@@ -162,7 +162,44 @@ inline core::Task<core::Expected<size_t>> Stream::read()
 
 inline core::Task<core::Expected<>> Stream::write(std::string_view data)
 {
-	write_buf.append(data);
+	const char* ptr = data.data();
+	size_t remaining = data.size();
+
+	if (write_buf.readable_bytes() == 0)
+	{
+		while (remaining > 0)
+		{
+			ssize_t n = ::write(write_fd, ptr, remaining);
+			if (n > 0)
+			{
+				ptr += n;
+				remaining -= n;
+			}
+			else if (n == 0) [[unlikely]]
+			{
+				elog::LOG_DEBUG("Stream write: BrokenPipe on fd={}", write_fd);
+				co_return core::details::make_error_code(
+					core::details::Error::BrokenPipe);
+			}
+			else if (n < 0)
+			{
+				if (errno == EWOULDBLOCK || errno == EAGAIN)
+				{
+					write_buf.append(ptr, remaining);
+					remaining = 0;
+					break;
+				}
+				auto ec = core::details::from_errno(errno);
+				elog::LOG_DEBUG("Stream write error on fd={}: {}", write_fd, ec.message());
+				co_return ec;
+			}
+		}
+	}
+	else if (!data.empty())
+	{
+		write_buf.append(data);
+	}
+
 	while (write_buf.readable_bytes() > 0)
 	{
 		ssize_t n =

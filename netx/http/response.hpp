@@ -55,6 +55,7 @@ struct Response
 		return *this;
 	}
 
+	std::string to_head_string() const;
 	std::string to_formatted_string() const;
 
 	Response& with_file(const std::string& path)
@@ -150,24 +151,25 @@ struct Response
 	std::string file;
 };
 
-inline std::string Response::to_formatted_string() const
+inline std::string Response::to_head_string() const
 {
 	std::string result;
 
 	auto out = std::back_inserter(result);
-
-	// 第一行
 	std::format_to(out, "{} {} {}\r\n", version_, status_code, status_msg_);
-
-	// 头部
 	for (const auto& header : header_params_)
 	{
 		std::format_to(out, "{}: {}\r\n", header.first, header.second);
 	}
+	std::format_to(out, "\r\n");
 
-	// 空行和正文
-	std::format_to(out, "\r\n{}", body);
+	return result;
+}
 
+inline std::string Response::to_formatted_string() const
+{
+	std::string result = to_head_string();
+	result += body;
 	return result;
 }
 } // namespace http

@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <numbers>
 #include <type_traits>
 
 inline constexpr double PI = 3.1415926535;
@@ -69,3 +71,81 @@ consteval int compiler_min(std::initializer_list<int> xs)
 }
 
 static_assert(min({1, 3, 2, 4}) == 1);
+
+struct Shape
+{
+	virtual ~Shape() = default;
+	virtual double get_area() const noexcept = 0;
+};
+
+struct Circle : Shape
+{
+	constexpr Circle(double r) : r_(r)
+	{
+	}
+
+	constexpr double get_area() const noexcept override
+	{
+		return std::numbers::pi * r_ * r_;
+	}
+
+  private:
+	double r_;
+};
+
+constexpr double square(double b)
+{
+	if (std::is_constant_evaluated())
+	{
+		return b * b;
+	}
+	else
+	{
+		return b * b;
+	}
+}
+
+static_assert(square(10.0) == 100.0);
+
+inline int n = 3;
+inline double mucho = square(n);
+
+constexpr size_t collatz_time(size_t n)
+{
+	size_t step = 0;
+	for (; n > 1; ++step)
+	{
+		n = (n % 2 == 0) ? n / 2 : 3 * n + 1;
+	}
+	return step;
+}
+
+constexpr size_t sum_collatz_time(size_t n)
+{
+	int sum = 0;
+	for (size_t i = 1; i <= n; i++)
+	{
+		sum += collatz_time(i);
+	}
+	return sum;
+}
+
+// inline int res =
+// 	sum_collatz_time(10000); // Constexpr evaluation hit maximum step limit
+
+inline constexpr struct CountedPolicy
+{
+	bool a = true;
+	bool b = true;
+} default_counted_policy;
+
+template <CountedPolicy policy = default_counted_policy> struct Counted
+{
+	constexpr static bool a = policy.a;
+	constexpr static bool b = policy.b;
+};
+
+using CountedOnlyA = Counted<{.b = false}>;
+
+constexpr CountedOnlyA tmp;
+static_assert(tmp.a && !tmp.b);

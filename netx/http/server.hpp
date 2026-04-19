@@ -198,6 +198,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
 					session.clear();
 					s.read_buf.try_shrink();
+					s.write_buf.try_shrink();
 				}
 				else
 				{

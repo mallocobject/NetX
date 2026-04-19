@@ -264,13 +264,15 @@ inline void Buffer::extend_space(size_t len)
 	// writableBytes + prependableBytes - kPrependSize < len
 	if (writable_bytes() + prependable_bytes() < len + kPrependSize)
 	{
-		elog::LOG_DEBUG("Buffer resize: old_size={} new_size={}", data_.size(), wptr_ + len);
+		elog::LOG_DEBUG("Buffer resize: old_size={} new_size={}", data_.size(),
+						wptr_ + len);
 		data_.resize(wptr_ + len);
 	}
 	else
 	{
 		size_t readabel_bytes = readable_bytes();
-		elog::LOG_DEBUG("Buffer shift: rptr={} wptr={} readable={}", rptr_, wptr_, readabel_bytes);
+		elog::LOG_DEBUG("Buffer shift: rptr={} wptr={} readable={}", rptr_,
+						wptr_, readabel_bytes);
 		std::copy(data_.data() + rptr_, data_.data() + wptr_,
 				  data_.data() + kPrependSize);
 

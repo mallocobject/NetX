@@ -23,7 +23,7 @@ class Sender
 {
   public:
 	static core::Task<core::Expected<>> send(net::details::Stream& stream,
-											 Response& res)
+										 Response& res)
 	{
 		if (res.type == ResponseType::kFile)
 		{
@@ -31,7 +31,11 @@ class Sender
 		}
 		else
 		{
-			co_return co_await stream.write(res.to_formatted_string());
+			if (auto exp = co_await stream.write(res.to_head_string()); !exp)
+			{
+				co_return exp.error();
+			}
+			co_return co_await stream.write(res.body);
 		}
 	}
 
@@ -41,7 +45,7 @@ class Sender
 
   private:
 	static core::Task<core::Expected<>> send_file(net::details::Stream& stream,
-												  Response& res)
+										  Response& res)
 	{
 		static std::unordered_map<std::string,
 								  std::pair<std::shared_ptr<void>, size_t>>
@@ -66,7 +70,11 @@ class Sender
 		{
 			elog::LOG_DEBUG("send_file: not found {}", file_path);
 			res.with_status(404).with_body("<h1>404 Not Found</h1>");
-			co_return co_await stream.write(res.to_formatted_string());
+			if (auto exp = co_await stream.write(res.to_head_string()); !exp)
+			{
+				co_return exp.error();
+			}
+			co_return co_await stream.write(res.body);
 		}
 
 		struct stat st;
@@ -74,7 +82,11 @@ class Sender
 		{
 			::close(fd);
 			res.with_status(404).with_body("<h1>404 Not Found</h1>");
-			co_return co_await stream.write(res.to_formatted_string());
+			if (auto exp = co_await stream.write(res.to_head_string()); !exp)
+			{
+				co_return exp.error();
+			}
+			co_return co_await stream.write(res.body);
 		}
 
 		size_t size = st.st_size;
@@ -93,10 +105,10 @@ class Sender
 			if (!file_set.contains(file_path))
 			{
 				file_set.try_emplace(file_path,
-									 std::make_pair(std::shared_ptr<void>(
-														mapped, [size](void* p)
-														{ ::munmap(p, size); }),
-													size));
+								 std::make_pair(std::shared_ptr<void>(
+													mapped, [size](void* p)
+													{ ::munmap(p, size); }),
+												size));
 			}
 			else
 			{
@@ -116,9 +128,9 @@ class Sender
 		size_t remaining = total_size;
 
 		res.with_status(200).with_header("Content-Length",
-										 std::to_string(remaining));
+									 std::to_string(remaining));
 
-		if (auto exp = co_await stream.write(res.to_formatted_string()); !exp)
+		if (auto exp = co_await stream.write(res.to_head_string()); !exp)
 		{
 			co_return exp.error();
 		}
