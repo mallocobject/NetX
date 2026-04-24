@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <concepts>
 #include <iostream>
 #include <iterator>
@@ -55,4 +56,13 @@ int main()
 	f(vec);
 
 	f(std::string_view{"1234"});
+
+	std::vector v{1,2,3,4,5};
+	auto iter = std::ranges::find(v, 3);
+
+	std::cout << *iter << std::endl;
+
+	std::vector<int> f{};
+	auto iter2 = std::ranges::find(f, 3);
+
 }

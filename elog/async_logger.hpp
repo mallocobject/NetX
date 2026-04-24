@@ -6,6 +6,7 @@
 #include "lock_free_queue.hpp"
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <latch>
 #include <mutex>
 #include <string_view>
@@ -21,6 +22,7 @@ using BlockQueue = LockFreeQueue<LogBlock*>;
 
 struct ProducerCtx
 {
+	std::mutex cur_mtx;
 	LogBlock* cur{new LogBlock()};
 	BlockQueue full_queue; // producer push, consumer pop
 	BlockQueue free_queue; // consumer push, producer pop
@@ -73,8 +75,9 @@ struct AsyncLogger
 	void do_done()
 	{
 		done_.store(true, std::memory_order_release);
-		pending_.fetch_add(1, std::memory_order_release);
-		pending_.notify_one();
+
+		cv_.notify_one();
+
 		if (thread_.joinable())
 		{
 			thread_.join();
@@ -90,7 +93,8 @@ struct AsyncLogger
 
   private:
 	std::atomic<bool> done_{false};
-	std::atomic<uint32_t> pending_{0};
+	std::mutex cv_mtx_;
+	std::condition_variable cv_;
 
 	std::mutex reg_mtx_;
 	std::vector<ProducerCtx*> producers_;
@@ -115,9 +119,9 @@ inline void AsyncLogger::append_message(std::string_view msg)
 
 	thread_local ProducerCtx* ctx = register_producer();
 
-	bool need_write = !ctx->cur->append(msg);
+	std::lock_guard<std::mutex> lock(ctx->cur_mtx);
 
-	if (need_write)
+	if (!ctx->cur->append(msg))
 	{
 		ctx->full_queue.push(ctx->cur);
 
@@ -132,15 +136,9 @@ inline void AsyncLogger::append_message(std::string_view msg)
 			ctx->cur = new LogBlock();
 		}
 
-		if (need_write)
-		{
-			ctx->cur->append(msg);
-		}
+		ctx->cur->append(msg);
 
-		if (pending_.fetch_add(1, std::memory_order_release) == 0)
-		{
-			pending_.notify_one();
-		}
+		cv_.notify_one();
 	}
 }
 
@@ -155,11 +153,14 @@ inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
 
 	while (true)
 	{
-		uint32_t n = pending_.load(std::memory_order_acquire);
-		if (n == 0 && !done_.load(std::memory_order_acquire))
-			pending_.wait(0);
+		std::unique_lock<std::mutex> lock(cv_mtx_);
+		cv_.wait_for(lock, std::chrono::seconds(flush_interval));
+		lock.unlock();
 
-		pending_.store(0, std::memory_order_release);
+		if (done_.load(std::memory_order_acquire))
+		{
+			break;
+		}
 
 		std::vector<ProducerCtx*> snapshot;
 		{
@@ -177,31 +178,57 @@ inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
 				ctx->free_queue.push(blk);
 				any = true;
 			}
+
+			std::lock_guard<std::mutex> lock(ctx->cur_mtx);
+			if (!ctx->cur->empty())
+			{
+				LogBlock* cur_blk = ctx->cur;
+
+				LogBlock* free_blk = nullptr;
+				if (ctx->free_queue.pop(free_blk))
+				{
+					free_blk->clear();
+					ctx->cur = free_blk;
+				}
+				else
+				{
+					ctx->cur = new LogBlock();
+				}
+
+				out_file.append(cur_blk->data, cur_blk->len);
+				ctx->free_queue.push(cur_blk);
+				any = true;
+			}
 		}
 
 		if (any)
 		{
 			out_file.flush();
 		}
+	}
 
-		if (done_.load(std::memory_order_acquire))
+	// 最后一次：drain 所有数据
+	std::vector<ProducerCtx*> snapshot;
+	{
+		std::lock_guard lock(reg_mtx_);
+		snapshot = producers_;
+	}
+
+	for (auto* ctx : snapshot)
+	{
+		LogBlock* blk = nullptr;
+		while (ctx->full_queue.pop(blk))
 		{
-			// 最后一次：drain full_queue + cur 残留
-			// 此时所有生产者线程已 join，cur 不会再被写入，安全访问
-			for (auto* ctx : snapshot)
-			{
-				LogBlock* blk = nullptr;
-				while (ctx->full_queue.pop(blk))
-				{
-					out_file.append(blk->data, blk->len);
-				}
-				if (!ctx->cur->empty())
-				{
-					out_file.append(ctx->cur->data, ctx->cur->len);
-				}
-			}
-			break;
+			out_file.append(blk->data, blk->len);
+			delete blk;
 		}
+
+		std::lock_guard<std::mutex> lock(ctx->cur_mtx);
+		if (!ctx->cur->empty())
+		{
+			out_file.append(ctx->cur->data, ctx->cur->len);
+		}
+		delete ctx->cur;
 	}
 
 	out_file.flush();

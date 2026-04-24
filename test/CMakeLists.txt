@@ -1,10 +1,10 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.22)
 project(test)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(test1 data_table.cpp)
+add_executable(test1 benchmark_logger.cpp)
 # add_executable(test2 rpc_server_mt.cpp)
 # add_executable(test3 rpc_client.cpp)
 

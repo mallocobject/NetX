@@ -136,6 +136,14 @@ struct Response
 		{
 			return "image/jpeg";
 		}
+		else if (path.ends_with(".gif"))
+		{
+			return "image/gif";
+		}
+		else if (path.ends_with(".mp4"))
+		{
+			return "video/mp4";
+		}
 
 		return "application/octet-stream";
 	}

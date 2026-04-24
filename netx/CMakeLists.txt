@@ -1,8 +1,9 @@
-add_library(netx INTERFACE)
-# set(SQLITE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/db/sqlite3.c)
-# set(SHELL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/db/shell.c)
+cmake_minimum_required(VERSION 3.22)
 
-# add_library(netx STATIC ${SQLITE_SRC})
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_library(netx INTERFACE)
 
 target_include_directories(netx
     INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..
@@ -13,7 +14,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    add_compile_options(-fcoroutines)
+    target_compile_options(netx INTERFACE -fcoroutines)
 endif()
 
 find_package(OpenSSL REQUIRED)

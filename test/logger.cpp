@@ -1,5 +1,6 @@
 #include "elog/logger.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <thread>
@@ -39,7 +40,7 @@ void func()
 int main()
 {
 	size_t thread_count = 8;
-	size_t entry_count = 1000000;
+	size_t entry_count = 1;
 	std::vector<std::thread> thread_pool(8);
 
 	for (auto& thread : thread_pool)
@@ -61,4 +62,6 @@ int main()
 
 	std::cout << "expected count: " << thread_count * entry_count << std::endl;
 	std::cout << "count: " << count << std::endl;
+
+	std::this_thread::sleep_for(std::chrono::seconds(10));
 }
