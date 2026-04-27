@@ -100,24 +100,35 @@ inline auto g_log_threshold = []() -> LogLevel
 	return LogLevel::INFO;
 }();
 
+inline auto g_log_callback = std::function<void(LogLevel, std::string_view)>{};
+
 inline void output_log(LogLevel lv, std::string&& msg,
 					   const std::source_location& loc)
 {
 
-	thread_local uint64_t tid =
-		std::hash<std::thread::id>{}(std::this_thread::get_id());
-	std::chrono::zoned_time now{std::chrono::current_zone(),
-								std::chrono::system_clock::now()};
-	msg = std::format("{}[{}]<{}> {}:{} {}()-> {}", now, tid,
-					  log_level_to_string(lv), loc.file_name(), loc.line(),
-					  loc.function_name(), msg);
 	if (lv >= g_log_threshold)
 	{
-		std::cout << level_ansi_colors[static_cast<std::uint8_t>(lv)] + msg +
-						 "\033[0m\n";
+		thread_local uint64_t tid =
+			std::hash<std::thread::id>{}(std::this_thread::get_id());
+		std::chrono::zoned_time now{std::chrono::current_zone(),
+									std::chrono::system_clock::now()};
+		std::string fmsg = std::format("{}[{}]<{}> {}:{} {}()-> {}", now, tid,
+									   log_level_to_string(lv), loc.file_name(),
+									   loc.line(), loc.function_name(), msg);
+
 		if (g_log_file)
 		{
-			g_log_file->append_message(msg + '\n');
+			g_log_file->append_message(fmsg + '\n');
+		}
+
+		if (g_log_callback)
+		{
+			g_log_callback(lv, msg);
+		}
+		else
+		{
+			std::cout << level_ansi_colors[static_cast<std::uint8_t>(lv)] +
+							 fmsg + "\033[0m\n";
 		}
 	}
 }
