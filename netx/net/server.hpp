@@ -224,7 +224,7 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 					if (emfile_count > 5)
 					{
 						std::this_thread::sleep_for(
-							std::chrono::milliseconds(10));
+							std::chrono::milliseconds(1000));
 						emfile_count = 0;
 					}
 

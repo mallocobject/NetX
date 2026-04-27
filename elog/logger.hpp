@@ -115,11 +115,10 @@ inline void output_log(LogLevel lv, std::string&& msg,
 	{
 		std::cout << level_ansi_colors[static_cast<std::uint8_t>(lv)] + msg +
 						 "\033[0m\n";
-	}
-
-	if (g_log_file)
-	{
-		g_log_file->append_message(msg + '\n');
+		if (g_log_file)
+		{
+			g_log_file->append_message(msg + '\n');
+		}
 	}
 }
 } // namespace details
