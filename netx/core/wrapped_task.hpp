@@ -52,6 +52,7 @@ template <Future TaskT> struct WrappedTask
 			{
 				auto& promise = task_.coro.promise();
 				promise.continuation = new DeleteNodeHandle{owner, iter};
+				promise.owns_continuation = true;
 				promise.schedule();
 			}
 			else

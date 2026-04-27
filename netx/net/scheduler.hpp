@@ -6,6 +6,7 @@
 #include "netx/core/task.hpp"
 #include "netx/core/wrapped_task.hpp"
 #include "netx/net/lock_free_queue.hpp"
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +48,12 @@ struct Scheduler
 		task_queue_.push(std::move(task));
 	}
 
+	void stop()
+	{
+		running_.store(false, std::memory_order_release);
+		wakeup();
+	}
+
 	core::Task<core::Expected<>> scheduler_loop(std::latch& start_latch);
 
 	Scheduler(Scheduler&& other) noexcept
@@ -73,6 +80,7 @@ struct Scheduler
 
 	int wakeup_fd_{-1};
 	core::details::EventLoop::EventAwaiter wakeup_awaiter_;
+	std::atomic<bool> running_{true};
 };
 
 inline core::Expected<> Scheduler::wakeup()
@@ -135,7 +143,7 @@ inline core::Task<core::Expected<>> Scheduler::scheduler_loop(
 {
 	start_latch.count_down();
 
-	while (true)
+	while (running_.load(std::memory_order_acquire))
 	{
 		if (auto exp = co_await wakeup_awaiter_; !exp)
 		{
@@ -143,6 +151,12 @@ inline core::Task<core::Expected<>> Scheduler::scheduler_loop(
 			elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
 			co_return {};
 		}
+
+		if (!running_.load(std::memory_order_acquire))
+		{
+			break;
+		}
+
 		if (auto exp = shallow(); !exp)
 		{
 			const std::error_code& ec = exp.error();
@@ -159,6 +173,9 @@ inline core::Task<core::Expected<>> Scheduler::scheduler_loop(
 			*it = core::details::WrappedTask(std::move(tmp), sts_, it);
 		}
 	}
+
+	wakeup_awaiter_.reset();
+	co_return {};
 }
 } // namespace details
 } // namespace net

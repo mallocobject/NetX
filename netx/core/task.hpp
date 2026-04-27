@@ -24,6 +24,15 @@ template <typename T = void> struct [[nodiscard]] Task
 	{
 		promise_type() = default;
 
+		~promise_type()
+		{
+			if (owns_continuation && continuation)
+			{
+				delete continuation;
+				continuation = nullptr;
+			}
+		}
+
 		template <typename... Args>
 		promise_type(details::NoWaitAtInitialSuspend, Args&&...) noexcept
 			: wait_at_initial_suspend(false)
@@ -70,6 +79,10 @@ template <typename T = void> struct [[nodiscard]] Task
 			if (continuation)
 			{
 				continuation->schedule();
+				if (owns_continuation)
+				{
+					continuation = nullptr;
+				}
 			}
 			return {};
 		}
@@ -134,6 +147,7 @@ template <typename T = void> struct [[nodiscard]] Task
 		}
 
 		CoroHandle* continuation{nullptr};
+		bool owns_continuation{false};
 		bool wait_at_initial_suspend{true};
 	};
 

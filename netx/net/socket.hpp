@@ -148,9 +148,9 @@ inline core::Expected<> connect(int fd, const Address& serv_addr)
 	return {};
 }
 
-inline core::Expected<> shutdown(int fd)
+inline core::Expected<> shutdown(int fd, int how = SHUT_WR)
 {
-	if (::shutdown(fd, SHUT_WR) == -1)
+	if (::shutdown(fd, how) == -1)
 	{
 		return core::details::from_errno(errno);
 	}

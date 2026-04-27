@@ -11,6 +11,7 @@
 #include "netx/net/scheduler.hpp"
 #include "netx/net/socket.hpp"
 #include "netx/net/stream.hpp"
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
@@ -119,6 +120,26 @@ template <typename Derived> struct Server
 
 	void start();
 
+	void stop()
+	{
+		if (!running_.exchange(false, std::memory_order_acq_rel))
+		{
+			return;
+		}
+
+		if (stream_.read_fd >= 0)
+		{
+			// 主动关闭监听的FD以唤醒 server_loop 的 epoll_wait
+			Socket::shutdown(stream_.read_fd, SHUT_RDWR);
+		}
+
+		std::lock_guard<std::mutex> lock(mtx_);
+		for (auto* sched : schedulers_)
+		{
+			sched->stop();
+		}
+	}
+
   protected:
 	explicit Server(Stream&& stream, int idle_fd1, int idle_fd2)
 		: stream_(std::move(stream)), idle_fd_{idle_fd1, idle_fd2}
@@ -145,6 +166,7 @@ template <typename Derived> struct Server
 	std::chrono::nanoseconds timeout_{std::chrono::nanoseconds::max()};
 
 	std::error_code sticky_error_;
+	std::atomic<bool> running_{true};
 };
 
 template <typename Derived> void Server<Derived>::start()
@@ -156,7 +178,18 @@ template <typename Derived> void Server<Derived>::start()
 		return;
 	}
 
-	signal(SIGPIPE, SIG_IGN);
+	// signal(SIGPIPE, SIG_IGN);
+
+	static Derived* instance = static_cast<Derived*>(this);
+	auto sig_handler = [](int sig)
+	{
+		elog::LOG_WARN("Received signal {}, shutting down server...", sig);
+		instance->stop();
+	};
+
+	std::signal(SIGINT, sig_handler);
+	std::signal(SIGTERM, sig_handler);
+	std::signal(SIGPIPE, SIG_IGN);
 
 	std::latch start_latch(loop_count_);
 	for (size_t idx = 0; idx < loop_count_; idx++)
@@ -183,7 +216,7 @@ template <typename Derived> void Server<Derived>::start()
 	}
 
 	start_latch.wait();
-	elog::LOG_WARN("NetX-Server listening on {}",
+	elog::LOG_INFO("NetX-Server listening on {}",
 				   stream_.sock_addr.to_formatted_string());
 	core::async_main(server_loop());
 }
@@ -197,22 +230,37 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 			.fd = listen_fd, .flags = core::details::Event::kEventRead});
 	static size_t lucky_boy = 0;
 
-	while (true)
+	while (running_.load(std::memory_order_acquire))
 	{
 		if (auto exp = co_await ev_awaiter; !exp)
 		{
+			if (!running_.load(std::memory_order_acquire))
+			{
+				break;
+			}
+
 			const std::error_code& ec = exp.error();
 			elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
 			co_return {};
 		}
+		if (!running_.load(std::memory_order_acquire))
+		{
+			break;
+		}
+
 		static int emfile_count = 0;
-		while (true)
+		while (running_.load(std::memory_order_acquire))
 		{
 			Address addr;
 			auto exp = Socket::accept(listen_fd, &addr);
 
 			if (!exp)
 			{
+				if (!running_.load(std::memory_order_acquire))
+				{
+					break;
+				}
+
 				switch (errno)
 				{
 				case EAGAIN:
@@ -258,7 +306,7 @@ core::Task<core::Expected<>> Server<Derived>::server_loop()
 			if (dup_conn_fd < 0)
 			{
 				auto ec = core::details::from_errno(errno);
-				Socket::close(dup_conn_fd);
+				Socket::close(conn_fd);
 
 				elog::LOG_ERROR("dup failed for fd={}: {}", conn_fd,
 								ec.message());
