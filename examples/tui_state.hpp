@@ -5,13 +5,23 @@
 #include <ftxui/screen/color.hpp>
 #include <functional>
 #include <mutex>
+#include <queue>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+enum class ServerState
+{
+	kStopped,
+	kRunning
+};
+
 struct SharedState
 {
+	std::atomic<ServerState> state{ServerState::kStopped};
 	std::atomic<bool> running{true};
+
 	std::atomic<size_t> trace_count{0};
 	std::atomic<size_t> debug_count{0};
 	std::atomic<size_t> info_count{0};
@@ -27,8 +37,8 @@ struct SharedState
 	std::shared_mutex qps_mtx;
 	std::vector<size_t> qps_history;
 
-	std::shared_mutex fs_mtx;
-	std::unordered_map<std::string, bool> allowed_files;
+	std::mutex fs_mtx;
+	std::unordered_map<std::string, bool> config_allowed_files;
 
 	std::function<void()> trigger_redraw;
 

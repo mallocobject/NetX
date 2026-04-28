@@ -17,7 +17,7 @@ FetchContent_Declare(ftxui
 )
 FetchContent_MakeAvailable(ftxui)
 
-add_executable(netx_gui main.cpp)
+add_executable(netx_gui test.cpp)
 
 target_compile_definitions(netx_gui PRIVATE
     NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/public"

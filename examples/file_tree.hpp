@@ -1,9 +1,13 @@
 #pragma once
+#include "examples/tui_state.hpp"
+#include <atomic>
 #include <filesystem>
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/component_base.hpp>
 #include <ftxui/component/component_options.hpp>
+#include <ftxui/component/event.hpp>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,7 +17,7 @@ struct FileNode
 	std::string path;
 	bool is_dir = false;
 	bool expanded = true;
-	bool checked = true;
+	bool checked = false;
 	std::vector<std::shared_ptr<FileNode>> children;
 	void set_check_recursive(bool check)
 	{
@@ -28,12 +32,10 @@ inline std::shared_ptr<FileNode> scan_directory(
 	const std::filesystem::path& root_path)
 {
 	auto node = std::make_shared<FileNode>();
-	node->name = root_path.filename().string();
-	if (node->name.empty())
-	{
-		node->name = root_path.string();
-	}
-	node->path = root_path.string();
+	node->name = root_path.filename().string(); // public
+
+	node->path = root_path.string(); // .../public
+
 	node->is_dir = std::filesystem::is_directory(root_path);
 	if (node->is_dir)
 	{
@@ -44,9 +46,9 @@ inline std::shared_ptr<FileNode> scan_directory(
 	}
 	return node;
 }
-inline ftxui::Component build_tree_ui(std::shared_ptr<FileNode> node,
-									std::function<void()> on_change,
-									bool is_last = true, int depth = 0)
+inline ftxui::Component build_tree_ui_impl(std::shared_ptr<FileNode> node,
+										   std::function<void()> on_change,
+										   bool is_last = true, int depth = 0)
 {
 	using namespace ftxui;
 
@@ -55,8 +57,9 @@ inline ftxui::Component build_tree_ui(std::shared_ptr<FileNode> node,
 
 	auto checkbox_transform = [](const EntryState& s) -> Element
 	{
+		bool running = (g_state.state.load() == ServerState::kRunning);
 		auto icon = s.state ? "▣ " : "▢ ";
-		return hbox({text(icon), text(s.label)});
+		return hbox({text(icon), text(s.label)}) | (running ? dim : nothing);
 	};
 
 	if (!node->is_dir)
@@ -75,13 +78,16 @@ inline ftxui::Component build_tree_ui(std::shared_ptr<FileNode> node,
 	auto children_container = Container::Vertical({});
 	for (size_t i = 0; i < node->children.size(); i++)
 	{
-		children_container->Add(build_tree_ui(node->children[i], on_change,
-											i == node->children.size() - 1,
-											depth + 1));
+		children_container->Add(
+			build_tree_ui_impl(node->children[i], on_change,
+							   i == node->children.size() - 1, depth + 1));
 	}
 
 	auto dir_icon = [](const EntryState& s) -> Element
-	{ return text(s.state ? "▣" : "▢"); };
+	{
+		bool running = (g_state.state.load() == ServerState::kRunning);
+		return text(s.state ? "▣" : "▢") | (running ? dim : nothing);
+	};
 
 	CheckboxOption dir_opt;
 	dir_opt.checked = &node->checked;
@@ -115,12 +121,36 @@ inline ftxui::Component build_tree_ui(std::shared_ptr<FileNode> node,
 								  text(" "), toggle_btn->Render(),
 								  text(" " + node->name)});
 						if (node->expanded)
+						{
 							return vbox({header, children_container->Render()});
+						}
 						return header;
 					});
 }
-inline void gather_allowed_files(std::shared_ptr<FileNode> node,
-							   std::unordered_map<std::string, bool>& map)
+
+inline ftxui::Component build_tree_ui(std::shared_ptr<FileNode> node,
+									  std::function<void()> on_change)
+{
+	auto base_tree = build_tree_ui_impl(node, on_change);
+	return ftxui::CatchEvent(
+		base_tree,
+		[](ftxui::Event e)
+		{
+			if (g_state.state.load(std::memory_order_acquire) ==
+				ServerState::kRunning)
+			{
+				if (e.is_mouse() || e.is_character() ||
+					e == ftxui::Event::Return)
+				{
+					return true;
+				}
+			}
+			return false;
+		});
+}
+
+inline void gather_config_allowed_files(
+	std::shared_ptr<FileNode> node, std::unordered_map<std::string, bool>& map)
 {
 	if (!node->is_dir && node->checked)
 	{
@@ -129,6 +159,6 @@ inline void gather_allowed_files(std::shared_ptr<FileNode> node,
 	}
 	for (auto& child : node->children)
 	{
-		gather_allowed_files(child, map);
+		gather_config_allowed_files(child, map);
 	}
 }

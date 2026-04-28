@@ -11,7 +11,6 @@
 #include <ftxui/dom/elements.hpp>
 #include <thread>
 using namespace ftxui;
-using namespace std::chrono_literals;
 using namespace netx::core;
 using namespace netx::http;
 using namespace std::chrono_literals;
@@ -29,8 +28,8 @@ int main()
 	auto sync_files = [&]
 	{
 		std::lock_guard<std::shared_mutex> lock(g_state.fs_mtx);
-		g_state.allowed_files.clear();
-		gather_allowed_files(root_node, g_state.allowed_files);
+		g_state.config_allowed_files.clear();
+		gather_config_allowed_files(root_node, g_state.config_allowed_files);
 	};
 	auto file_tree_ui = build_tree_ui(root_node, sync_files);
 	sync_files();
@@ -69,7 +68,8 @@ int main()
 							{
 								std::shared_lock<std::shared_mutex> lock(
 									g_state.fs_mtx);
-								allowed = g_state.allowed_files[req.url_path];
+								allowed =
+									g_state.config_allowed_files[req.url_path];
 							}
 							netx::http::Response res;
 							if (!allowed)

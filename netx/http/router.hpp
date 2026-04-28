@@ -77,16 +77,19 @@ inline core::Task<core::Expected<Response>> Router::dispatch(Request& req)
 		RadixTree<HttpHandler>::normalize_path(req.url_path);
 	req.url_path = clean_path;
 
-	auto match = trees_[req.method].search(clean_path);
-
-	HttpHandler handler;
-
-	if (match.value) // match.value 是指向 HttpHandler 的指针
+	if (auto it = trees_.find(req.method); it != trees_.end())
 	{
-		req.path_params = std::move(match.params);
+		HttpHandler handler;
 
-		co_return co_await (*match.value)(req);
+		if (auto match = it->second.search(clean_path);
+			match.value) // match.value 是指向 HttpHandler 的指针
+		{
+			req.path_params = std::move(match.params);
+
+			co_return co_await (*match.value)(req);
+		}
 	}
+
 	co_return Response{}.with_status(404).with_body("<h1>404 Not Found</h1>");
 }
 
