@@ -136,7 +136,7 @@ inline core::Task<core::Expected<>> Connection::send_frame(
 	else
 	{
 		header.push_back(127);
-		std::uint16_t len = htobe64(payload.size());
+		std::uint64_t len = htobe64(payload.size());
 		header.append(reinterpret_cast<const char*>(&len), 8);
 	}
 

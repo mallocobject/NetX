@@ -32,8 +32,9 @@ struct Router
 	}
 
 	template <typename Handler>
-		requires std::invocable<Handler> &&
-				 std::same_as<std::invoke_result_t<Handler>,
+		requires std::invocable<Handler, websocket::details::Connection&> &&
+				 std::same_as<std::invoke_result_t<
+								  Handler, websocket::details::Connection&>,
 							  core::Task<core::Expected<>>>
 	void route(const std::string& path, Handler&& handler)
 	{

@@ -51,8 +51,9 @@ class Server : public net::details::Server<Server>
 	}
 
 	template <typename Handler>
-		requires std::invocable<Handler> &&
-				 std::same_as<std::invoke_result_t<Handler>,
+		requires std::invocable<Handler, websocket::details::Connection&> &&
+				 std::same_as<std::invoke_result_t<
+								  Handler, websocket::details::Connection&>,
 							  core::Task<core::Expected<>>>
 	Server& route(const std::string& path, Handler&& handler)
 	{
@@ -167,7 +168,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 						if (auto exp = co_await details::Sender::send(s, res);
 							!exp)
 						{
-							const std::error_code& ec = res_exp.error();
+							const std::error_code& ec = exp.error();
 							elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
 							break;
 						}
