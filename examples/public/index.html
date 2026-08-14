@@ -1,8 +1,52 @@
 <!DOCTYPE html>
-<title>最简页面</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetX — High Performance Network Framework</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(1100px 700px at 15% 0%, #123a52 0%, #0b1520 45%, #05080d 100%);
+    color: #e6f1f7;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
+  }
+  .card {
+    text-align: center;
+    padding: 48px 64px;
+    border: 1px solid #1f4d66;
+    border-radius: 16px;
+    background: rgba(8, 20, 30, 0.6);
+    backdrop-filter: blur(4px);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  }
+  .logo {
+    font-size: 64px;
+    font-weight: 800;
+    letter-spacing: 10px;
+    background: linear-gradient(90deg, #38bdf8, #22d3ee);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  h1 { font-size: 20px; font-weight: 600; color: #9fb9c9; margin: 8px 0 24px; }
+  .status { color: #4ade80; font-size: 14px; }
+  .accent { color: #38bdf8; }
+  .hint { margin-top: 28px; color: #5b7d92; font-size: 13px; }
+</style>
+</head>
 <body>
-<script>
-alert('Hello World');
-</script>
+  <div class="card">
+    <div class="logo">NETX</div>
+    <h1>High Performance Network Framework</h1>
+    <div class="status">● server running — served by the <span class="accent">netx_gui</span> TUI dashboard</div>
+    <div class="hint">select <b>public/index.html</b> in the Shared Resources tree, press <b>Start</b>, then reload.</div>
+  </div>
 </body>
 </html>

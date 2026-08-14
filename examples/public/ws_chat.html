@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetX WebSocket Echo</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(1100px 700px at 15% 0%, #123a52 0%, #0b1520 45%, #05080d 100%);
+    color: #e6f1f7; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  .chat {
+    width: min(560px, 92vw); height: 70vh; display: flex; flex-direction: column;
+    border: 1px solid #1f4d66; border-radius: 14px;
+    background: rgba(8, 20, 30, 0.65); box-shadow: 0 24px 80px rgba(0,0,0,.5); overflow: hidden;
+  }
+  .head { padding: 12px 18px; border-bottom: 1px solid #1f4d66; display: flex; justify-content: space-between; align-items: center; }
+  .head b { color: #38bdf8; letter-spacing: 2px; }
+  #status { font-size: 12px; color: #5b7d92; }
+  #status.on { color: #4ade80; }
+  #log { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 78%; padding: 8px 12px; border-radius: 10px; font-size: 14px; word-break: break-word; }
+  .msg.you { align-self: flex-end; background: #123a52; color: #cfe9ff; }
+  .msg.server { align-self: flex-start; background: #16283a; color: #9fd4a8; }
+  .foot { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #1f4d66; }
+  input { flex: 1; padding: 10px 12px; border-radius: 8px; border: 1px solid #1f4d66;
+          background: #0a1520; color: #e6f1f7; font-family: inherit; outline: none; }
+  input:focus { border-color: #2196f3; }
+  button { padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer;
+           background: #2196f3; color: #fff; font-weight: 700; font-family: inherit; }
+  button:hover { background: #38a3f5; }
+</style>
+</head>
+<body>
+<div class="chat">
+  <div class="head"><b>NETX WS ECHO</b><span id="status">connecting…</span></div>
+  <div id="log"></div>
+  <div class="foot">
+    <input id="input" placeholder="type a message, press Enter…" autofocus>
+    <button onclick="send()">Send</button>
+  </div>
+</div>
+<script>
+const ws = new WebSocket(`ws://${location.host}/ws`);
+const log = document.getElementById('log');
+const status = document.getElementById('status');
+function append(cls, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+ws.onopen = () => {
+  status.textContent = '● connected';
+  status.classList.add('on');
+  append('server', 'connected — NetX will echo your messages back');
+};
+ws.onclose = () => { status.textContent = '○ disconnected'; status.classList.remove('on'); };
+ws.onerror = () => { status.textContent = '✕ error'; status.classList.remove('on'); };
+ws.onmessage = e => append('server', e.data);
+function send() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text || ws.readyState !== 1) return;
+  ws.send(text);
+  append('you', text);
+  input.value = '';
+}
+document.getElementById('input').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+</script>
+</body>
+</html>
