@@ -2,20 +2,20 @@
 #define ELOG_FILE_MANAGER_HPP
 
 #include "elog/file_appender.hpp"
-#include <bits/chrono.h>
 #include <chrono>
 #include <cstddef>
 #include <format>
 #include <memory>
 #include <string>
 #include <utility>
+
 namespace elog
 {
 namespace details
 {
+
 struct FileManager
 {
-
 	explicit FileManager(
 		std::string dir, std::string prefix,
 		size_t roll_size = 100 * 1024 * 1024,
@@ -50,9 +50,11 @@ struct FileManager
 	const size_t roll_size_;
 	const std::chrono::seconds flush_interval_;
 	const size_t check_per_count_;
-	int count_;
+	int count_{0};
 
 	std::unique_ptr<FileAppender> file_;
+	std::string current_path_;
+	int same_second_count_{0};
 
 	std::chrono::time_point<std::chrono::system_clock, std::chrono::days>
 		last_day_;
@@ -98,12 +100,26 @@ inline void FileManager::roll_file(std::chrono::system_clock::time_point now)
 		std::chrono::floor<std::chrono::seconds>(now);
 	last_day_ = std::chrono::floor<std::chrono::days>(now);
 
+	std::chrono::zoned_time zt{std::chrono::current_zone(),
+							   last_roll_second_};
+
+	// 同一秒内多次滚动时加序号后缀,避免反复 append 到同一个文件
 	std::string path =
-		std::format("{}/{:%Y-%m-%dT%H:%M:%S}.log", dir_,
-					std::chrono::zoned_time{std::chrono::current_zone(),
-											last_roll_second_});
+		std::format("{}/{}{:%Y-%m-%dT%H:%M:%S}.log", dir_, prefix_, zt);
+	if (path == current_path_)
+	{
+		path = std::format("{}/{}{:%Y-%m-%dT%H:%M:%S}-{}.log", dir_, prefix_,
+						   zt, ++same_second_count_);
+	}
+	else
+	{
+		same_second_count_ = 0;
+		current_path_ = path;
+	}
+
 	file_ = std::make_unique<FileAppender>(path);
 }
+
 } // namespace details
 } // namespace elog
 

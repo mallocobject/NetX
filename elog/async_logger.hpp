@@ -3,11 +3,13 @@
 
 #include "elog/file_manager.hpp"
 #include "elog/log_block.hpp"
-#include "lock_free_queue.hpp"
+#include "elog/spsc_queue.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <latch>
+#include <memory>
 #include <mutex>
 #include <string_view>
 #include <thread>
@@ -18,14 +20,35 @@ namespace elog
 namespace details
 {
 
-using BlockQueue = LockFreeQueue<LogBlock*>;
-
 struct ProducerCtx
 {
 	std::mutex cur_mtx;
 	LogBlock* cur{new LogBlock()};
-	BlockQueue full_queue; // producer push, consumer pop
-	BlockQueue free_queue; // consumer push, producer pop
+
+	SpscQueue<LogBlock*> full; // 满块:生产者 push,消费者 drain
+	SpscQueue<LogBlock*> free; // 空块:消费者 push,生产者 drain
+
+	// 生产者侧的空块缓存(drain free 通道后按需取用)
+	SpscQueue<LogBlock*>::Node* free_stash{nullptr};
+
+	LogBlock* take_free()
+	{
+		using Node = SpscQueue<LogBlock*>::Node;
+		Node* stash = free_stash;
+		if (!stash)
+		{
+			stash = free.drain();
+		}
+		if (!stash)
+		{
+			return nullptr;
+		}
+		LogBlock* blk = stash->value;
+		free_stash = stash->next;
+		delete stash;
+		blk->clear(); // 复用前必须清空,否则旧内容会被重复写出
+		return blk;
+	}
 };
 
 struct AsyncLogger
@@ -75,20 +98,13 @@ struct AsyncLogger
 	void do_done()
 	{
 		done_.store(true, std::memory_order_release);
-
 		cv_.notify_one();
-
 		if (thread_.joinable())
 		{
 			thread_.join();
 		}
-
-		// consumer 已退出，安全清理所有 ctx
-		for (auto* ctx : producers_)
-		{
-			delete ctx;
-		}
-		producers_.clear();
+		// 注意:不释放 producers_ 及其中的块。进程退出瞬间仍可能有线程
+		// 在写日志,释放它们会引入 use-after-free;此处以少量泄漏换安全。
 	}
 
   private:
@@ -119,25 +135,31 @@ inline void AsyncLogger::append_message(std::string_view msg)
 
 	thread_local ProducerCtx* ctx = register_producer();
 
-	std::lock_guard<std::mutex> lock(ctx->cur_mtx);
-
-	if (!ctx->cur->append(msg))
+	bool wake = false;
 	{
-		ctx->full_queue.push(ctx->cur);
+		std::lock_guard<std::mutex> lock(ctx->cur_mtx);
 
-		LogBlock* free_blk = nullptr;
-		if (ctx->free_queue.pop(free_blk))
+		if (ctx->cur->append(msg))
 		{
-			free_blk->clear();
-			ctx->cur = free_blk;
-		}
-		else
-		{
-			ctx->cur = new LogBlock();
+			return; // 快路径:一次 memcpy
 		}
 
+		// 当前块写满:发布满块,换一块继续
+		ctx->full.push(ctx->cur);
+
+		LogBlock* fresh = ctx->take_free();
+		if (!fresh)
+		{
+			fresh = new LogBlock();
+		}
+		ctx->cur = fresh;
 		ctx->cur->append(msg);
+		wake = true;
+	}
 
+	if (wake)
+	{
+		ctx->full.flush();
 		cv_.notify_one();
 	}
 }
@@ -147,91 +169,125 @@ inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
 							 std::chrono::seconds flush_interval,
 							 size_t check_per_count, std::latch& start_latch)
 {
-	FileManager out_file(dir, prefix, roll_size, flush_interval,
-						 check_per_count);
+	// 先放行构造者:文件初始化失败只降级文件日志,不拖死/不崩进程
 	start_latch.count_down();
+
+	std::unique_ptr<FileManager> out_file;
+	try
+	{
+		out_file = std::make_unique<FileManager>(dir, prefix, roll_size,
+												 flush_interval,
+												 check_per_count);
+	}
+	catch (const std::exception& e)
+	{
+		std::fprintf(stderr, "[elog] file logging disabled: %s\n", e.what());
+		return;
+	}
+
+	bool file_ok = true;
 
 	while (true)
 	{
-		std::unique_lock<std::mutex> lock(cv_mtx_);
-		cv_.wait_for(lock, std::chrono::seconds(flush_interval));
-		lock.unlock();
+		{
+			std::unique_lock<std::mutex> lock(cv_mtx_);
+			cv_.wait_for(lock, flush_interval);
+		}
 
 		if (done_.load(std::memory_order_acquire))
 		{
 			break;
 		}
 
-		std::vector<ProducerCtx*> snapshot;
+		try
 		{
-			std::lock_guard lock(reg_mtx_);
-			snapshot = producers_;
-		}
-
-		bool any = false;
-		for (auto* ctx : snapshot)
-		{
-			LogBlock* blk = nullptr;
-			while (ctx->full_queue.pop(blk))
+			std::vector<ProducerCtx*> snapshot;
 			{
-				out_file.append(blk->data, blk->len);
-				ctx->free_queue.push(blk);
-				any = true;
+				std::lock_guard lock(reg_mtx_);
+				snapshot = producers_;
 			}
 
-			std::lock_guard<std::mutex> lock(ctx->cur_mtx);
-			if (!ctx->cur->empty())
+			bool any = false;
+			for (auto* ctx : snapshot)
 			{
-				LogBlock* cur_blk = ctx->cur;
-
-				LogBlock* free_blk = nullptr;
-				if (ctx->free_queue.pop(free_blk))
+				// 1) 满块批量落盘(FIFO)
+				for (auto* n = to_fifo<LogBlock*>(ctx->full.drain()); n;)
 				{
-					free_blk->clear();
-					ctx->cur = free_blk;
+					auto* node = n;
+					n = n->next;
+					out_file->append(node->value->data, node->value->len);
+					ctx->free.push(node->value);
+					delete node;
+					any = true;
 				}
-				else
-				{
-					ctx->cur = new LogBlock();
-				}
+				ctx->free.flush();
 
-				out_file.append(cur_blk->data, cur_blk->len);
-				ctx->free_queue.push(cur_blk);
-				any = true;
+				// 2) 当前残块:锁内只交换,锁外才写盘
+				LogBlock* taken = nullptr;
+				{
+					std::lock_guard<std::mutex> lock(ctx->cur_mtx);
+					if (!ctx->cur->empty())
+					{
+						taken = ctx->cur;
+						ctx->cur = new LogBlock();
+					}
+				}
+				if (taken)
+				{
+					out_file->append(taken->data, taken->len);
+					ctx->free.push(taken);
+					ctx->free.flush();
+					any = true;
+				}
+			}
+
+			if (any)
+			{
+				out_file->flush();
 			}
 		}
-
-		if (any)
+		catch (const std::exception& e)
 		{
-			out_file.flush();
+			// 文件故障:停止文件日志,终端日志不受影响
+			std::fprintf(stderr, "[elog] file logging disabled: %s\n",
+						 e.what());
+			file_ok = false;
+			break;
 		}
 	}
 
-	// 最后一次：drain 所有数据
-	std::vector<ProducerCtx*> snapshot;
+	// 最后一次:尽力排空(不释放任何生产者对象,避免与在途日志线程竞争)
+	if (file_ok)
 	{
-		std::lock_guard lock(reg_mtx_);
-		snapshot = producers_;
-	}
-
-	for (auto* ctx : snapshot)
-	{
-		LogBlock* blk = nullptr;
-		while (ctx->full_queue.pop(blk))
+		try
 		{
-			out_file.append(blk->data, blk->len);
-			delete blk;
-		}
+			std::vector<ProducerCtx*> snapshot;
+			{
+				std::lock_guard lock(reg_mtx_);
+				snapshot = producers_;
+			}
+			for (auto* ctx : snapshot)
+			{
+				for (auto* n = to_fifo<LogBlock*>(ctx->full.drain()); n;)
+				{
+					auto* node = n;
+					n = n->next;
+					out_file->append(node->value->data, node->value->len);
+					delete node;
+				}
 
-		std::lock_guard<std::mutex> lock(ctx->cur_mtx);
-		if (!ctx->cur->empty())
+				std::lock_guard<std::mutex> lock(ctx->cur_mtx);
+				if (!ctx->cur->empty())
+				{
+					out_file->append(ctx->cur->data, ctx->cur->len);
+				}
+			}
+			out_file->flush();
+		}
+		catch (...)
 		{
-			out_file.append(ctx->cur->data, ctx->cur->len);
 		}
-		delete ctx->cur;
 	}
-
-	out_file.flush();
 }
 
 } // namespace details

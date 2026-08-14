@@ -2,6 +2,7 @@
 #define ELOG_LOGGER_HPP
 
 #include "elog/async_logger.hpp"
+#include <atomic>
 #include <chrono>
 #include <concepts>
 #include <cstdint>
@@ -91,45 +92,62 @@ inline auto g_log_file = []() -> std::unique_ptr<AsyncLogger>
 	return nullptr;
 }();
 
-inline auto g_log_threshold = []() -> LogLevel
+inline std::atomic<LogLevel> g_log_threshold{[]() -> LogLevel
 {
 	if (auto lv = std::getenv("ELOG_LEVEL"))
 	{
 		return log_level_from_string(lv);
 	}
 	return LogLevel::INFO;
-}();
+}()};
 
 inline auto g_log_callback = std::function<void(LogLevel, std::string_view)>{};
+
+// 时区只需查一次,避免每条日志做 tzdb 查找
+inline const std::chrono::time_zone* cached_zone()
+{
+	static const std::chrono::time_zone* zone = std::chrono::current_zone();
+	return zone;
+}
 
 inline void output_log(LogLevel lv, std::string&& msg,
 					   const std::source_location& loc)
 {
-
-	if (lv >= g_log_threshold)
+	if (lv < g_log_threshold.load(std::memory_order_relaxed))
 	{
-		thread_local uint64_t tid =
-			std::hash<std::thread::id>{}(std::this_thread::get_id());
-		std::chrono::zoned_time now{std::chrono::current_zone(),
-									std::chrono::system_clock::now()};
-		std::string fmsg = std::format("{}[{}]<{}> {}:{} {}()-> {}", now, tid,
-									   log_level_to_string(lv), loc.file_name(),
-									   loc.line(), loc.function_name(), msg);
+		return;
+	}
 
-		if (g_log_file)
-		{
-			g_log_file->append_message(fmsg + '\n');
-		}
+	// 只在需要前缀的路径(文件日志 / 终端输出)才做时间戳格式化;
+	// 仅回调场景下直接把原始消息交给调用方
+	if (g_log_file == nullptr && g_log_callback)
+	{
+		g_log_callback(lv, msg);
+		return;
+	}
 
-		if (g_log_callback)
-		{
-			g_log_callback(lv, msg);
-		}
-		else
-		{
-			std::cout << level_ansi_colors[static_cast<std::uint8_t>(lv)] +
-							 fmsg + "\033[0m\n";
-		}
+	thread_local uint64_t tid =
+		std::hash<std::thread::id>{}(std::this_thread::get_id());
+
+	std::chrono::zoned_time now{cached_zone(), std::chrono::system_clock::now()};
+	std::string fmsg = std::format("{}[{}]<{}> {}:{} {}()-> {}", now, tid,
+								   log_level_to_string(lv), loc.file_name(),
+								   loc.line(), loc.function_name(), msg);
+
+	if (g_log_file)
+	{
+		fmsg += '\n';
+		g_log_file->append_message(fmsg);
+	}
+
+	if (g_log_callback)
+	{
+		g_log_callback(lv, msg);
+	}
+	else
+	{
+		std::cout << level_ansi_colors[static_cast<std::uint8_t>(lv)] + fmsg +
+						 "\033[0m\n";
 	}
 }
 } // namespace details
@@ -144,7 +162,7 @@ inline void set_log_path(std::string dir, std::string prefix, size_t roll_size,
 
 inline void set_log_threshold(LogLevel lv)
 {
-	details::g_log_threshold = lv;
+	details::g_log_threshold.store(lv, std::memory_order_relaxed);
 }
 
 template <typename... Args>
@@ -152,9 +170,13 @@ void log(LogLevel lv,
 		 details::WithSourceLocation<std::format_string<Args...>> fmt,
 		 Args&&... args)
 {
-	const auto& loc = fmt.location();
+	if (lv < details::g_log_threshold.load(std::memory_order_relaxed))
+	{
+		return; // 低于阈值:连格式化都省掉
+	}
+
 	auto msg = std::vformat(fmt.format().get(), std::make_format_args(args...));
-	details::output_log(lv, std::move(msg), loc);
+	details::output_log(lv, std::move(msg), fmt.location());
 }
 
 #define _FUNCTION(name)                                                        \
