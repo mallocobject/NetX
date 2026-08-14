@@ -20,7 +20,18 @@
 
 ---
 
-##  HTTP Server Setup Example
+NetX is a header-only C++20 coroutine network framework for Linux, built on
+epoll. It ships with an HTTP/WebSocket server and an async file logger — the
+only third-party dependency is OpenSSL (WebSocket handshake).
+
+## Build
+
+```bash
+cmake -S . -B build && cmake --build build -j        # builds elog/netx, test1 and all examples
+cmake -S examples -B examples/build && cmake --build examples/build -j  # examples-only
+```
+
+## Quick Start
 
 ```cpp
 #include "netx/core/expected.hpp"
@@ -51,22 +62,51 @@ int main()
 }
 ```
 
-### Settings
+Routes support `:param` and `*` wildcards (`/users/:id`, `/*`). Handlers read
+the request via `req.header/query/path/body` and build the reply with
+`Response{}.with_status().with_body().with_file()`.
 
-- `.listen("127.0.0.1", 8080)` binds the HTTP server to the local address and port.
-- `.route("GET", "/", ...)` registers a handler for `GET /`.
-- `.timeout(3s)` closes or times out idle connections after `3s`.
-- `.loop(8)` starts `8` worker event loops for request processing.
-- `.start()` launches the server.
+Core coroutine primitives: `Task<T>`, `Expected<T>`, `sleep`, `when_any`,
+`co_spawn`, `async_main`.
+
+## WebSocket
+
+```cpp
+.route("/ws", [](websocket::details::Connection& conn) -> Task<Expected<>>
+{
+    while (true)
+    {
+        auto frame = co_await conn.receive();
+        if (!frame) break;                          // connection closed
+        co_await conn.send_text(frame.value().payload); // echo back
+    }
+    co_return {};
+})
+```
+
+`Connection` provides `receive()` / `send_text()` / `send_binary()` /
+`send_ping()` / `send_pong()` / `send_close()`. The upgrade handshake
+(101 + `Sec-WebSocket-Accept`) is handled automatically.
+
+## Examples
+
+| Target | Description |
+| --- | --- |
+| `netx_http` | HTTP server: routes, `:name` path params, static files (8080) |
+| `netx_ws` | WebSocket echo + chat page `public/ws_chat.html` (8081) |
+| `netx_tcp_echo` | Raw TCP echo on `net::details::Server`, the layer below HTTP (8082) |
+
+```bash
+./examples/build/netx_http        # http://127.0.0.1:8080/
+./examples/build/netx_ws          # http://127.0.0.1:8081/
+./examples/build/netx_tcp_echo    # echo | nc 127.0.0.1 8082
+```
 
 ## Logging
-
-You can configure logging with environment variables before starting the executable.
 
 ```bash
 ELOG_PATH=/absolute/log/dir ELOG_LEVEL=INFO ./build/test/test1
 ```
 
-- `ELOG_PATH={dir}` sets the log output directory. The directory must already exist.
-- `ELOG_LEVEL={TRACE, DEBUG, INFO, WARN, ERROR, FATAL}` filters terminal log output only.
-- Async file logging is still written in full and is not affected by `ELOG_LEVEL`.
+`ELOG_PATH` sets the log directory (missing directories degrade to terminal-only
+logging); `ELOG_LEVEL={TRACE…FATAL}` filters both terminal and file output.
