@@ -20,8 +20,15 @@ namespace elog
 namespace details
 {
 
+struct AsyncLogger;
+
 struct ProducerCtx
 {
+	// 反向指回注册它的 logger。thread_local 缓存是"每线程一份",与实例
+	// 无关,必须校验归属,否则 set_log_path 换实例后本线程仍会把日志投进
+	// 旧实例的通道(新实例的消费者看不到,那些块再也不会被回收)。
+	const AsyncLogger* owner{nullptr};
+
 	std::mutex cur_mtx;
 	LogBlock* cur{new LogBlock()};
 
@@ -53,15 +60,19 @@ struct ProducerCtx
 
 struct AsyncLogger
 {
+	// dir/prefix 必须按值接收、按值捕获:调用方传入的实参往往是临时
+	// std::string(或 getenv 得到的 const char*),在构造函数返回后立即销毁,
+	// 而后台线程仍要读取它们。按引用捕获会造成 stack-use-after-scope。
 	explicit AsyncLogger(
-		const std::string& dir, const std::string& prefix,
+		std::string dir, std::string prefix,
 		size_t roll_size = 100 * 1024 * 1024,
 		std::chrono::seconds flush_interval = std::chrono::seconds(3),
 		size_t check_per_count = 1024)
 	{
 		std::latch start_latch{1};
 		thread_ = std::jthread(
-			[&] {
+			[this, dir = std::move(dir), prefix = std::move(prefix), roll_size,
+			 flush_interval, check_per_count, &start_latch] {
 				run(dir, prefix, roll_size, flush_interval, check_per_count,
 					start_latch);
 			});
@@ -107,8 +118,18 @@ struct AsyncLogger
 		// 在写日志,释放它们会引入 use-after-free;此处以少量泄漏换安全。
 	}
 
+	// 由消费者线程在退出前调用:此后不再接收新日志。
+	// 必须与 done_(关闭请求)分开:消费者可能因文件故障自行退出,那时
+	// done_ 仍为 false,若不停止接收,生产者投递的块无人 drain,
+	// 内存会随日志量无界增长。
+	void stop_accepting() noexcept
+	{
+		accepting_.store(false, std::memory_order_release);
+	}
+
   private:
 	std::atomic<bool> done_{false};
+	std::atomic<bool> accepting_{true};
 	std::mutex cv_mtx_;
 	std::condition_variable cv_;
 
@@ -121,6 +142,7 @@ struct AsyncLogger
 inline ProducerCtx* AsyncLogger::register_producer()
 {
 	auto* ctx = new ProducerCtx();
+	ctx->owner = this;
 	std::lock_guard lock(reg_mtx_);
 	producers_.push_back(ctx);
 	return ctx;
@@ -128,12 +150,16 @@ inline ProducerCtx* AsyncLogger::register_producer()
 
 inline void AsyncLogger::append_message(std::string_view msg)
 {
-	if (done_.load(std::memory_order_acquire))
+	if (!accepting_.load(std::memory_order_acquire))
 	{
 		return;
 	}
 
-	thread_local ProducerCtx* ctx = register_producer();
+	thread_local ProducerCtx* ctx = nullptr;
+	if (ctx == nullptr || ctx->owner != this)
+	{
+		ctx = register_producer();
+	}
 
 	bool wake = false;
 	{
@@ -169,7 +195,8 @@ inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
 							 std::chrono::seconds flush_interval,
 							 size_t check_per_count, std::latch& start_latch)
 {
-	// 先放行构造者:文件初始化失败只降级文件日志,不拖死/不崩进程
+	// 先放行构造者:文件初始化失败只降级文件日志,不拖死/不崩进程。
+	// 因为 dir/prefix 已按值捕获,此刻放行不再有悬垂引用风险。
 	start_latch.count_down();
 
 	std::unique_ptr<FileManager> out_file;
@@ -182,6 +209,13 @@ inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
 	catch (const std::exception& e)
 	{
 		std::fprintf(stderr, "[elog] file logging disabled: %s\n", e.what());
+	}
+
+	if (!out_file)
+	{
+		// 消费者不会存在了:必须立刻停止接收。否则生产者持续投递,
+		// 而没有人 drain,内存会随日志量无界增长——这里曾是主要泄漏点。
+		stop_accepting();
 		return;
 	}
 
@@ -256,7 +290,10 @@ inline void AsyncLogger::run(const std::string& dir, const std::string& prefix,
 		}
 	}
 
-	// 最后一次:尽力排空(不释放任何生产者对象,避免与在途日志线程竞争)
+	// 先停止接收新日志再排空,避免边排空边有新块进来;仍然不释放任何
+	// 生产者对象,以免与在途的日志线程竞争。
+	stop_accepting();
+
 	if (file_ok)
 	{
 		try

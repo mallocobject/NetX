@@ -89,6 +89,7 @@ struct Response
 	static std::string_view code2msg(int code)
 	{
 		static const std::unordered_map<int, std::string_view> status_msgs = {
+			{101, "Switching Protocols"},
 			{200, "OK"},
 			{201, "Created"},
 			{204, "No Content"},
