@@ -1,5 +1,3 @@
-# cmake_minimum_required(VERSION 3.22)
-
 add_library(netx INTERFACE)
 
 target_include_directories(netx
@@ -13,6 +11,3 @@ endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(netx INTERFACE -fcoroutines)
 endif()
-
-find_package(OpenSSL REQUIRED)
-target_link_libraries(netx INTERFACE OpenSSL::SSL OpenSSL::Crypto)

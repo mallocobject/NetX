@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-D__cpp_lib_expected=202211L]

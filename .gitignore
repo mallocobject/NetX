@@ -1,3 +1,6 @@
+.vscode/
 build/
 .cache/
+.agent/
 logs/
+*.log

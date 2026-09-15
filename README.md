@@ -9,7 +9,7 @@
   </pre>
 
   <p align="center">
-    <img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20">
+    <img src="https://img.shields.io/badge/C%2B%2B-23-blue.svg" alt="C++23">
     <img src="https://img.shields.io/badge/platform-Linux-red.svg" alt="Platform">
     <img src="https://img.shields.io/badge/build-CMake-blueviolet.svg" alt="CMake">
     <img src="https://img.shields.io/badge/status-Developing-green.svg" alt="Developing">
@@ -20,7 +20,7 @@
 
 ---
 
-NetX is a header-only C++20 coroutine network framework for Linux, built on
+NetX is a header-only C++23 coroutine network framework for Linux, built on
 epoll. It ships with an HTTP/WebSocket server and an async file logger — the
 only third-party dependency is OpenSSL (WebSocket handshake).
 

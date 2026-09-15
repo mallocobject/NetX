@@ -1,23 +1,21 @@
-cmake_minimum_required(VERSION 3.22)
 project(test)
 
-# set(CMAKE_CXX_STANDARD 20)
-# set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Catch2 3 REQUIRED)
 
-add_executable(test1 http_server.cpp)
-# add_executable(test2 rpc_server_mt.cpp)
-# add_executable(test3 rpc_client.cpp)
+# 启用 CTest 后 `test` 这个目标名被保留，配置时会直接报
+#   The target name "test" is reserved when CTest testing is enabled.
+# 所以可执行文件不能叫 test，这里改名为 netx_test。
+add_executable(netx_test
+    result.cpp
+    expected.cpp
+    event_loop.cpp
+    task.cpp
+    async_main.cpp
+    cancel.cpp
+    sleep.cpp
+    when_any.cpp)
 
-target_link_libraries(test1 PRIVATE netx elog)
-# target_link_libraries(test2 PRIVATE netx elog)
-# target_link_libraries(test3 PRIVATE netx elog)
+target_link_libraries(netx_test PRIVATE netx Catch2::Catch2WithMain)
 
-target_compile_definitions(test1 PRIVATE 
-    NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
-# target_compile_definitions(test2 PRIVATE 
-#     NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-# )
-# target_compile_definitions(test3 PRIVATE 
-#     NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-# )
+include(Catch)
+catch_discover_tests(netx_test)

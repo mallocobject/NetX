@@ -1,20 +1,13 @@
 #pragma once
 
-namespace netx
-{
-namespace core
-{
-namespace details
-{
-template <typename T = void> struct NonVoidHelper
-{
-	using Type = T;
+namespace netx::core::details {
+template <typename T = void>
+struct NonVoidHelper {
+    using Type = T;
 };
 
-template <> struct NonVoidHelper<void>
-{
-	using Type = NonVoidHelper;
+template <>
+struct NonVoidHelper<void> {
+    using Type = NonVoidHelper;
 };
-} // namespace details
-} // namespace core
-} // namespace netx
+} // namespace netx::core::details

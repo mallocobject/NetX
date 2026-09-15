@@ -1,23 +1,14 @@
 #pragma once
 
-#include "netx/core/handle.hpp"
 #include <cstdint>
 #include <sys/epoll.h>
-namespace netx
-{
-namespace core
-{
-namespace details
-{
-struct Event
-{
-	static constexpr std::uint32_t kEventRead{EPOLLIN};
-	static constexpr std::uint32_t kEventWrite{EPOLLOUT};
 
-	HandleInfo info{};
-	int fd{-1};
-	std::uint32_t flags{0};
+namespace netx::core::details {
+struct Event {
+    inline static constexpr std::uint32_t kEventRead{EPOLLIN};
+    inline static constexpr std::uint32_t kEventWrite{EPOLLOUT};
+
+    int fd{-1};
+    std::uint32_t flags{0};
 };
-} // namespace details
-} // namespace core
-} // namespace netx
+} // namespace netx::core::details
