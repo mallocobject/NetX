@@ -139,11 +139,11 @@ TEST_CASE("输入全都无效时给出 InvalidOperation", "[when_any]") {
 }
 
 TEST_CASE("输入是裸 Task<T> 时槽位就是 T，不再要求 Expected", "[when_any]") {
-    auto r = async_main(
-        when_any(delayed_value(50ms, 111), delayed_value(1ms, 222)));
+    auto r =
+        async_main(when_any(delayed_value(50ms, 111), delayed_value(1ms, 222)));
 
     REQUIRE(r.has_value());
-    CHECK(r->index() == 1);       // 1ms 那个赢
+    CHECK(r->index() == 1);        // 1ms 那个赢
     CHECK(std::get<1>(*r) == 222); // variant<int, int>，按下标取
 }
 
@@ -157,8 +157,8 @@ TEST_CASE("裸 Task<T> 与 Task<Expected<T>> 能混在同一次竞速里", "[whe
 
 TEST_CASE("裸 Task<T> 的输家同样被取消，不拖住循环", "[when_any]") {
     const auto start = steady_clock::now();
-    auto r = async_main(
-        when_any(delayed_value(500ms, 1), delayed_value(1ms, 2)));
+    auto r =
+        async_main(when_any(delayed_value(500ms, 1), delayed_value(1ms, 2)));
     const auto elapsed = steady_clock::now() - start;
 
     REQUIRE(r.has_value());

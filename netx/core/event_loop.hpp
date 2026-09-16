@@ -16,6 +16,7 @@
 
 namespace netx::core::details {
 class EventLoop {
+  public:
     class EventAwaiter {
       private:
         EventLoop &loop_;
@@ -203,7 +204,14 @@ class EventLoop {
     template <typename Rep, typename Period>
     void call_after(std::chrono::duration<Rep, Period> duration,
                     Handle &handle) {
-        call_at(Clock::now() + duration, handle);
+        // 饱和加法：duration 大到会把 time_point 顶溢出时钳到最大时刻。
+        // 直接写 now + duration 会回绕成负数（nanoseconds::max() 就够触发），
+        // 截止时间落到过去，定时器立刻触发 —— 而调用方的意思是"很久以后"。
+        const Clock::time_point now = Clock::now();
+        const Clock::duration room = Clock::time_point::max() - now;
+        const Clock::duration want =
+            std::chrono::duration_cast<Clock::duration>(duration);
+        call_at(now + std::min(want, room), handle);
     }
 
     /// 取消，并沿等待链向下传递。幂等，重复调用无副作用。

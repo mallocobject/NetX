@@ -106,7 +106,8 @@ TEST_CASE("Task 之间可以 co_await 串联", "[task]") {
     CHECK(task.coro.promise().result() == 84);
 }
 
-TEST_CASE("co_await 左值 Task：走 await_transform(Task<U>&)，帧不转移", "[task]") {
+TEST_CASE("co_await 左值 Task：走 await_transform(Task<U>&)，帧不转移",
+          "[task]") {
     auto child = answer(); // 左值：所有权还在本用例手上
     auto parent = awaits_lvalue(child);
 

@@ -11,6 +11,7 @@ message(STATUS "Cmake build mode: ${CMAKE_BUILD_TYPE}")
 include(CTest)
 
 add_subdirectory(netx)
+add_subdirectory(elog)
 if(BUILD_TESTING)
     add_subdirectory(test)
 endif()

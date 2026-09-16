@@ -11,3 +11,6 @@ endif()
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(netx INTERFACE -fcoroutines)
 endif()
+
+find_package(OpenSSL REQUIRED)
+target_link_libraries(netx INTERFACE OpenSSL::SSL OpenSSL::Crypto)

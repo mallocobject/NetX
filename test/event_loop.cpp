@@ -34,6 +34,20 @@ class Recorder : public Handle {
     std::vector<HandleId> &log_;
 };
 
+/// 取消一个 handle，好让 run_until_complete() 有收工的机会
+class Canceller : public Handle {
+  public:
+    explicit Canceller(Handle &target) noexcept : target_(target) {
+    }
+
+    void run() override {
+        EventLoop::loop().cancel(target_);
+    }
+
+  private:
+    Handle &target_;
+};
+
 /// fd 的 RAII 包装，避免断言失败时泄漏
 class FdGuard {
   public:
@@ -237,7 +251,8 @@ TEST_CASE("call_at 收绝对时刻：过去的立刻到，未来的等到点", "
     CHECK(waited >= 28ms); // 提前醒就说明绝对时刻没被当真
 }
 
-TEST_CASE("call_at 同一时刻注册多个：全都会跑到，按 id 稳定裁决", "[event_loop]") {
+TEST_CASE("call_at 同一时刻注册多个：全都会跑到，按 id 稳定裁决",
+          "[event_loop]") {
     auto &loop = EventLoop::loop();
     std::vector<HandleId> log;
     Recorder a{log};
@@ -263,7 +278,8 @@ TEST_CASE("call_at 同一时刻注册多个：全都会跑到，按 id 稳定裁
     CHECK(log[2] == c.id);
 }
 
-TEST_CASE("stopped 覆盖待办表的三种形态：就绪 / 定时 / 等事件", "[event_loop]") {
+TEST_CASE("stopped 覆盖待办表的三种形态：就绪 / 定时 / 等事件",
+          "[event_loop]") {
     auto &loop = EventLoop::loop();
     std::vector<HandleId> log;
 
@@ -530,4 +546,24 @@ TEST_CASE("Epoller 对未注册的 fd 修改会返回错误", "[event_loop]") {
     const auto exp = epoller.modify_event(event);
     REQUIRE_FALSE(exp.has_value());
     CHECK(exp.error() == Error::InvalidOperation);
+}
+
+TEST_CASE("call_after 对超大 duration 不会溢出成立即触发", "[event_loop]") {
+    auto &loop = EventLoop::loop();
+    std::vector<HandleId> log;
+
+    // 这正是 http 层 timeout_ 的默认值。修之前 call_after 算的是
+    // Clock::now() + duration，int64 纳秒再加 nanoseconds::max() 会回绕成
+    // 负数，截止时间落到过去，定时器下一轮就被执行 —— 表现成"没设超时，
+    // 却立刻超时"。压测时它跟 socket 读赛跑，一半请求被回 408。
+    Recorder huge{log};
+    loop.call_after(std::chrono::nanoseconds::max(), huge);
+
+    // 20ms 后把还没到期的那个取消，否则 run_until_complete() 会一直等
+    Canceller stopper{huge};
+    loop.call_after(std::chrono::milliseconds(20), stopper);
+
+    loop.run_until_complete();
+
+    CHECK(log.empty()); // 超大 duration 的超时回调不该被执行
 }

@@ -275,7 +275,8 @@ class [[nodiscard]] Task {
         destroy();
     }
 
-    Task(Task &&other) : coro(std::exchange(other.coro, nullptr)) {
+    // 移动只 exchange 一个 coroutine_handle（本质是指针），不会抛
+    Task(Task &&other) noexcept : coro(std::exchange(other.coro, nullptr)) {
     }
 
     Task &operator=(Task &&other) {

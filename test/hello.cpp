@@ -1,6 +1,6 @@
-#include <iostream>
 #include <ostream>
+#include <print>
 
 int main() {
-    std::println(std::cout, "{}", "Hello World");
+    std::println("{}", "Hello World");
 }

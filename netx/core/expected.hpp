@@ -160,6 +160,15 @@ inline auto from_errno_to_unexpected(int err) {
     return std::unexpected<std::error_code>{from_errno(err)};
 }
 
+/// 把本库的错误码包成 unexpected。
+///
+/// std::expected 没有从裸 E 构造的构造函数，必须包一层 std::unexpected
+/// 才会走它的 unexpected 构造。这个包装在库里出现得太频繁，抽成一个函数
+/// 免得每次都写两遍命名空间。
+inline auto make_error_to_unexpected(Error e) {
+    return std::unexpected<std::error_code>{make_error_code(e)};
+}
+
 } // namespace netx::core::details
 
 namespace std {

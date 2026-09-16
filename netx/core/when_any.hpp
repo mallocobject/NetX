@@ -77,9 +77,10 @@ constexpr bool is_valid(const T &t) {
 /// Expected<T>& 反推的；换成 Task<int> 时槽位是裸 int，int& 绑不上
 /// Expected<T>&，模板直接不可行，整条 when_any 编译失败。
 template <Awaitable A>
-Task<Expected<>>
-WhenAnyHelper(A &&t, WhenAnyCtlBlock &ctl, NonVoidRetType<A> &result,
-              size_t index) {
+Task<Expected<>> WhenAnyHelper(A &&t,
+                               WhenAnyCtlBlock &ctl,
+                               NonVoidRetType<A> &result,
+                               size_t index) {
     // 空壳输入：没有东西可等。它不算赢家，也不能这么 co_await —— 等一个
     // 空壳任务等于"被取消"（Task 的 awaiter 会把调用者冻在挂起点），helper
     // 就再也走不到 try_complete()，when_any 便永远等不到赢家。

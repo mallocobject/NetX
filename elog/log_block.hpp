@@ -5,39 +5,31 @@
 #include <cstddef>
 #include <cstring>
 #include <string_view>
-namespace elog
-{
-namespace details
-{
-struct LogBlock
-{
-	constexpr static size_t kCap = 64 * 1024;
 
-	bool append(std::string_view s)
-	{
-		if (len + s.size() > kCap)
-		{
-			return false;
-		}
-		memcpy(data + len, s.data(), s.size());
-		len += s.size();
-		return true;
-	}
+namespace elog::details {
+struct LogBlock {
+    constexpr static size_t kCap = 64 * 1024;
 
-	void clear() noexcept
-	{
-		len = 0;
-	}
+    bool append(std::string_view s) {
+        if (len + s.size() > kCap) {
+            return false;
+        }
+        memcpy(data + len, s.data(), s.size());
+        len += s.size();
+        return true;
+    }
 
-	bool empty() const noexcept
-	{
-		return len == 0;
-	}
+    void clear() noexcept {
+        len = 0;
+    }
 
-	size_t len{0};
-	char data[kCap];
+    bool empty() const noexcept {
+        return len == 0;
+    }
+
+    size_t len{0};
+    char data[kCap];
 };
-} // namespace details
-} // namespace elog
+} // namespace elog::details
 
 #endif

@@ -155,6 +155,22 @@ TEST_CASE("每个 Error 枚举值都有稳定且非空的消息", "[errno]") {
     }
 }
 
+TEST_CASE("make_error_to_unexpected 包出本库类别的失败 Expected", "[errno]") {
+    const auto e = make_error_to_unexpected(Error::BrokenPipe);
+
+    // 值就是那个错误的 unexpected（不是"成功的 Expected 里装个错误码"）
+    static_assert(
+        std::is_same_v<decltype(e), const std::unexpected<std::error_code>>);
+    CHECK(e.error() == make_error_code(Error::BrokenPipe));
+    CHECK(e.error().value() == static_cast<int>(Error::BrokenPipe));
+    CHECK(e.error().category() == error_category());
+
+    // 喂给 Expected 之后 operator bool 为假 —— 这才叫失败
+    const Expected<> exp = e;
+    CHECK_FALSE(exp.has_value());
+    CHECK(exp.error() == make_error_code(Error::BrokenPipe));
+}
+
 TEST_CASE("Error::Success 的 error_code 是假值", "[errno]") {
     // 它在本库自己的类别里值也是 0，而 operator bool 看的就是 value() != 0
     CHECK_FALSE(static_cast<bool>(make_error_code(Error::Success)));

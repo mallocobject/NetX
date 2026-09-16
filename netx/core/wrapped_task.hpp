@@ -19,17 +19,26 @@ namespace details {
 /// 覆盖掉摘节点句柄，节点再也不会被摘除。读结果走 result()（它不登记
 /// continuation）。
 template <Future TaskT>
-struct WrappedTask {
+class WrappedTask {
+  private:
     using TaskList = std::list<WrappedTask>;
     using TaskListIter = TaskList::iterator;
 
+  private:
     /// 把本节点从所属链表里摘掉。摘除动作放在析构里，因为两条路径最终都会
     /// 走到这里：
     ///   - 任务正常跑完：final_suspend() 把它推给事件循环 → run() → delete
     ///     this；
     ///   - 任务在完成前被销毁：~promise_type() 负责 delete continuation_。
     /// 两处都只 delete 一次，所以节点也只会被摘一次。
-    struct DeleteNodeHandle : CoroHandle {
+    // 必须是 public 继承：class 的默认继承是 private，那样外部既不能把它
+    // 转成 CoroHandle*（set_continuation 要用），也调不到 schedule()
+    class DeleteNodeHandle : public CoroHandle {
+      private:
+        TaskList &owner;
+        TaskListIter iter;
+
+      public:
         DeleteNodeHandle(TaskList &o, TaskListIter it) noexcept
             : owner(o), iter(it) {
         }
@@ -43,10 +52,18 @@ struct WrappedTask {
         void run() override final {
             delete this;
         }
-
-        TaskList &owner;
-        TaskListIter iter;
     };
+
+  private:
+    TaskT task_{nullptr};
+
+  public:
+    /// 空壳：task_ 为 nullptr，valid() 为假。
+    ///
+    /// 调度链表需要它：登记一个任务得先用 emplace_back 把节点建出来、拿到
+    /// 节点自身的迭代器，才能构造摘节点句柄，所以绕不开"先默认构造再移动
+    /// 赋值"这一步。
+    WrappedTask() = default;
 
     explicit WrappedTask(TaskT &&task) noexcept : task_(std::move(task)) {
         if (task_.valid() && !task_.done()) {
@@ -129,9 +146,6 @@ struct WrappedTask {
     void cancel() {
         task_.destroy();
     }
-
-  private:
-    TaskT task_{nullptr};
 };
 } // namespace details
 
