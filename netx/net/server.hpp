@@ -298,7 +298,7 @@ inline void Server::start(this auto &self) {
 
     start_latch.wait();
 
-    elog::LOG_INFO("NetX-Server listening on {}",
+    elog::LOG_WARN("NetX-Server listening on {}",
                    self.stream_.sock_addr.to_formatted_string());
 
     core::async_main(self.server_loop());

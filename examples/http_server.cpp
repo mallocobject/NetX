@@ -33,6 +33,8 @@ int main(int argc, char **argv) {
     const size_t max_conns =
         (argc > 1) ? std::strtoul(argv[1], nullptr, 10) : 0;
 
+    elog::set_log_threshold(elog::LogLevel::FATAL);
+
     Server::server()
         .listen("0.0.0.0", 8080)
         // 首页
