@@ -12,6 +12,10 @@ using HandleId = std::uint64_t;
 
 class Handle;
 
+/// 等待 fd 事件的对象。定义在 event_loop.hpp 的命名空间作用域里 —— 正是为了
+/// 让这里能前置声明：挂起记录的槽要直接存它的指针。
+class EventAwaiter;
+
 /// 调度用的时钟。定时器集合按时刻排序，必须和 EventLoop 用同一个。
 using ScheduleClock = std::chrono::steady_clock;
 
@@ -44,13 +48,11 @@ class Handle {
     /// 只在 slot_kind 指明的那一个成员有效。
     ///   kReady —— 在就绪队列里的位置，供 O(1) 摘除
     ///   kTimer —— 在定时器集合里的位置
-    ///   kEvent —— fd，撤销注册时用它去 EventLoop 的 fd_owner_ 里查回
-    ///            EventAwaiter（那是 EventLoop 的嵌套类，没法在这里前置
-    ///            声明，所以槽里存 fd 而不是指针）
+    ///   kEvent —— 撤销 epoll 注册的入口
     union SlotRef {
         std::list<HandleInfo>::iterator ready;
         std::set<TimerEntry>::iterator timer;
-        int fd;
+        EventAwaiter *awaiter;
     };
 
     const HandleId id{0};

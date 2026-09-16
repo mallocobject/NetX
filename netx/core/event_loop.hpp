@@ -15,87 +15,63 @@
 #include <utility>
 
 namespace netx::core::details {
+class EventLoop;
+
+/// 等待一个 fd 上的事件。
+///
+/// 放在命名空间作用域而不是 EventLoop 内部：Handle 的挂起记录槽要能直接存
+/// 它的指针，而嵌套类在 handle.hpp 里没法前置声明。
+///
+/// 成员函数里要碰 EventLoop 的私有状态（epoller_、remember_event、
+/// forget_event），所以 EventLoop 把它声明成友元；定义则一律放到 EventLoop
+/// 完整之后。
+class EventAwaiter {
+  private:
+    EventLoop &loop_;
+    Event event_{};
+    bool registered_{false};
+    Expected<> exp_;
+
+  public:
+    explicit EventAwaiter(EventLoop &loop, const Event &event)
+        : loop_(loop), event_(event) {
+    }
+
+    ~EventAwaiter() {
+        (void)reset();
+    }
+
+    EventAwaiter(EventAwaiter &&other) noexcept;
+    EventAwaiter &operator=(EventAwaiter &&other) noexcept;
+
+    bool await_ready() const noexcept {
+        return false;
+    }
+
+    template <Promise P>
+    bool await_suspend(std::coroutine_handle<P> coro);
+
+    Expected<> await_resume() noexcept {
+        return std::move(exp_);
+    }
+
+    /// 注销 fd 并清掉循环里的 kEvent 记录；可重复调用
+    Expected<> reset() noexcept;
+
+    /// 由 EventLoop::cancel() 调用：注销 fd 并把结果置为 Cancelled。
+    /// 重新入队由 EventLoop 负责 —— 那边手里才有 Handle&。
+    void on_cancel() noexcept {
+        (void)reset();
+        exp_ = std::unexpected(make_error_code(Error::Cancelled));
+    }
+};
+
 class EventLoop {
   public:
-    class EventAwaiter {
-      private:
-        EventLoop &loop_;
-        Event event_{};
-        HandleId handle_id_{0};
-        bool registered_{false};
-        Expected<> exp_;
+    /// 沿用 EventLoop::EventAwaiter 这个写法
+    using EventAwaiter = netx::core::details::EventAwaiter;
 
-      public:
-        explicit EventAwaiter(EventLoop &loop, const Event &event)
-            : loop_(loop), event_(event) {
-        }
-
-        /// 注销 fd 并清掉循环里的 kEvent 记录；可重复调用
-        Expected<> reset() noexcept {
-            if (!std::exchange(registered_, false)) {
-                return {};
-            }
-
-            // 按 fd 找回 handle：这里拿不到 Handle&（析构路径上协程帧
-            // 可能已经没了），但 fd -> handle 的登记本来就由循环维护着。
-            loop_.forget_event(event_.fd);
-            return loop_.epoller_.unregister_event(event_);
-        }
-
-        ~EventAwaiter() {
-            (void)reset();
-        }
-
-        EventAwaiter(EventAwaiter &&other) noexcept
-            : loop_(other.loop_), event_(other.event_),
-              registered_(std::exchange(other.registered_, false)),
-              exp_(std::move(other.exp_)) {
-        }
-
-        EventAwaiter &operator=(EventAwaiter &&other) noexcept {
-            if (this == &other) {
-                return *this;
-            }
-
-            (void)reset();
-            event_ = other.event_;
-            registered_ = std::exchange(other.registered_, false);
-            exp_ = std::move(other.exp_);
-            return *this;
-        }
-
-        bool await_ready() const noexcept {
-            return false;
-        }
-
-        template <Promise P>
-        bool await_suspend(std::coroutine_handle<P> coro) {
-            auto &promise = coro.promise();
-
-            if (auto exp = registered_
-                               ? loop_.epoller_.modify_event(event_)
-                               : loop_.epoller_.register_event(event_)) {
-                registered_ = true;
-                exp_ = std::move(exp);
-                loop_.remember_event(promise, event_.fd, this);
-                return true;
-            } else {
-                exp_ = std::move(exp);
-                return false;
-            }
-        }
-
-        Expected<> await_resume() noexcept {
-            return std::move(exp_);
-        }
-
-        /// 由 EventLoop::cancel() 调用：注销 fd 并把结果置为 Cancelled。
-        /// 重新入队由 EventLoop 负责 —— 那边手里才有 Handle&。
-        void on_cancel() noexcept {
-            (void)reset();
-            exp_ = std::unexpected(make_error_code(Error::Cancelled));
-        }
-    };
+    friend class netx::core::details::EventAwaiter;
 
     static_assert(Awaiter<EventAwaiter>);
 
@@ -110,17 +86,9 @@ class EventLoop {
   private:
     Epoller epoller_{};
 
-    /// fd 的登记项：就绪时要回填给哪个 handle，以及撤销 epoll 注册要找哪个
-    /// awaiter。awaiter 放这里而不是 handle 的槽里 —— 它是 EventLoop 的嵌套
-    /// 类，handle.hpp 里前置声明不了。
-    struct FdOwner {
-        Handle *handle{nullptr};
-        EventAwaiter *awaiter{nullptr};
-    };
-
     std::list<HandleInfo> ready_; // FIFO，可 O(1) 摘除
     std::set<TimerEntry> scheduled_;
-    std::unordered_map<int, FdOwner> fd_owner_; // fd -> 回填与注销的入口
+    std::unordered_map<int, Handle *> fd_owner_; // 就绪 fd -> handle，回填用
 
     /// 当前持有挂起记录的 handle 数。挂起记录内联在 Handle 里之后，没有
     /// 一张表可以问"还有没有待办"了，就靠这个计数。
@@ -160,17 +128,12 @@ class EventLoop {
         handle.slot.ready = std::prev(ready_.end());
     }
 
-    /// 登记一次 epoll 等待：fd -> {handle, awaiter} 供事件回填与撤销注册
+    /// 登记一次 epoll 等待：fd -> handle 供事件回填，槽里的 awaiter 供
+    /// cancel() 撤销注册
     void remember_event(Handle &handle, int fd, EventAwaiter *awaiter) {
-        fd_owner_.insert_or_assign(fd, FdOwner{&handle, awaiter});
+        fd_owner_.insert_or_assign(fd, &handle);
         mark(handle, Kind::kEvent);
-        handle.slot.fd = fd;
-    }
-
-    /// 按 fd 找回撤销注册的入口
-    [[nodiscard]] EventAwaiter *find_awaiter(int fd) const noexcept {
-        auto it = fd_owner_.find(fd);
-        return (it == fd_owner_.end()) ? nullptr : it->second.awaiter;
+        handle.slot.awaiter = awaiter;
     }
 
     /// 注销 fd 登记并清掉该 handle 的 kEvent 槽（幂等）。
@@ -181,9 +144,8 @@ class EventLoop {
             return;
         }
 
-        if (it->second.handle != nullptr &&
-            it->second.handle->slot_kind == Kind::kEvent) {
-            clear(*it->second.handle);
+        if (it->second != nullptr && it->second->slot_kind == Kind::kEvent) {
+            clear(*it->second);
         }
         fd_owner_.erase(it);
     }
@@ -274,11 +236,9 @@ class EventLoop {
             scheduled_.erase(handle.slot.timer);
             break;
         case kEvent: {
-            auto *awaiter = find_awaiter(handle.slot.fd);
+            auto *awaiter = handle.slot.awaiter;
             clear(handle); // 先销账，下面的入队要建的是新记录
-            if (awaiter != nullptr) {
-                awaiter->on_cancel(); // 注销 fd，并把结果置为 Cancelled
-            }
+            awaiter->on_cancel(); // 注销 fd，并把结果置为 Cancelled
             // 直接入队（绕开 cancelled 守卫），让它以错误的形式恢复
             enqueue_ready(handle);
             return;
@@ -318,11 +278,9 @@ class EventLoop {
             scheduled_.erase(handle.slot.timer);
             break;
         case Kind::kEvent: {
-            auto *awaiter = find_awaiter(handle.slot.fd);
+            auto *awaiter = handle.slot.awaiter;
             clear(handle); // 先销账，reset() 内部还会再走一次 forget_event
-            if (awaiter != nullptr) {
-                (void)awaiter->reset();
-            }
+            (void)awaiter->reset();
             return;
         }
         case Kind::kNone:
@@ -365,16 +323,15 @@ inline Expected<> EventLoop::run_once() {
                 .and_then([this](auto &&fds) -> Expected<> {
                     for (int fd : fds) {
                         if (auto it = fd_owner_.find(fd);
-                            it != fd_owner_.end() &&
-                            it->second.handle != nullptr) {
-                            auto *handle = it->second.handle;
+                            it != fd_owner_.end() && it->second) {
+                            auto *handle = it->second;
                             // kEvent -> kReady：fd 就绪了。先在**这里**把内核侧
                             // 的账销掉（而不是等协程恢复时由 ~EventAwaiter
                             // 去销），否则排队中的 handle 还挂在 epoll 上，
                             // 之后把它取消也摘不掉那条注册，fd 再就绪一次
                             // 就把它唤醒了。
                             if (handle->slot_kind == Kind::kEvent) {
-                                (void)it->second.awaiter->reset();
+                                (void)handle->slot.awaiter->reset();
                             }
                             // 已取消的不再被事件唤醒（它欠的是结果，不是继续跑）
                             if (!handle->cancelled) {
@@ -420,4 +377,50 @@ inline Expected<> EventLoop::run_once() {
 
     return {};
 }
+
+// --- EventAwaiter 的定义：必须等 EventLoop 完整，才能碰它的私有成员 ---
+
+inline EventAwaiter::EventAwaiter(EventAwaiter &&other) noexcept
+    : loop_(other.loop_), event_(other.event_),
+      registered_(std::exchange(other.registered_, false)),
+      exp_(std::move(other.exp_)) {
+}
+
+inline EventAwaiter &EventAwaiter::operator=(EventAwaiter &&other) noexcept {
+    if (this == &other) {
+        return *this;
+    }
+
+    (void)reset();
+    event_ = other.event_;
+    registered_ = std::exchange(other.registered_, false);
+    exp_ = std::move(other.exp_);
+    return *this;
+}
+
+inline Expected<> EventAwaiter::reset() noexcept {
+    if (!std::exchange(registered_, false)) {
+        return {};
+    }
+
+    loop_.forget_event(event_.fd);
+    return loop_.epoller_.unregister_event(event_);
+}
+
+template <Promise P>
+bool EventAwaiter::await_suspend(std::coroutine_handle<P> coro) {
+    auto &promise = coro.promise();
+
+    if (auto exp = registered_ ? loop_.epoller_.modify_event(event_)
+                               : loop_.epoller_.register_event(event_)) {
+        registered_ = true;
+        exp_ = std::move(exp);
+        loop_.remember_event(promise, event_.fd, this);
+        return true;
+    } else {
+        exp_ = std::move(exp);
+        return false;
+    }
+}
+
 } // namespace netx::core::details

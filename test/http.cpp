@@ -171,9 +171,9 @@ TEST_CASE("查询串键与值也有上限", "[http][parser]") {
 TEST_CASE("超过上限的 body 被拒", "[http][parser]") {
     Parser p;
     // 声明得比上限多 1 字节
-    const std::string over =
-        "POST / HTTP/1.1\r\nContent-Length: " +
-        std::to_string(Parser::kMaxBodyLen + 1) + "\r\n\r\n";
+    const std::string over = "POST / HTTP/1.1\r\nContent-Length: " +
+                             std::to_string(Parser::kMaxBodyLen + 1) +
+                             "\r\n\r\n";
     CHECK_FALSE(p.parse(over));
 }
 
