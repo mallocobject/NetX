@@ -23,7 +23,13 @@ using netx::http::Server;
 
 using namespace std::chrono_literals;
 
-int main() {
+int main(int argc, char **argv) {
+    // 并发上限从命令行给，不给或给 0 都表示不限。
+    // 上限一旦设了，超出部分的连接会被接进来立刻关掉 —— 对端马上拿到
+    // 反馈，比让它在内核 backlog 里干等更早。
+    const size_t max_conns =
+        (argc > 1) ? std::strtoul(argv[1], nullptr, 10) : 0;
+
     Server::server()
         .listen("0.0.0.0", 8080)
         // 首页
@@ -79,7 +85,7 @@ int main() {
                    co_return Response{}.with_status(200).with_file(
                        std::string{NETX_WEB_SRC_DIR} + req.url_path);
                })
-        .max_connections(0)
+        .max_connections(max_conns)
         .timeout(60s)
         .loop(8)
         .start();
