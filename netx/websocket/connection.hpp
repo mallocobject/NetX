@@ -101,7 +101,7 @@ inline core::Task<core::Expected<Frame>> Connection::receive() {
 
     const size_t mask_len = has_mask ? 4 : 0;
 
-    // 掩码和载荷一次读齐：原来掩码、载荷各来一次，一个帧要读四回
+    // 掩码和载荷一次读齐：分几次读就是一个帧要读好几回
     if (mask_len + payload_len > 0) {
         co_await co_await ensure_read(mask_len + payload_len);
     }

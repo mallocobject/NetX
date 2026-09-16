@@ -205,7 +205,8 @@ class Buffer {
         prepend(std::bit_cast<std::array<std::byte, sizeof(T)>>(host2be(x)));
     }
 
-    // 数据不足时抛异常：原来只 assert，release 下 memcpy 会直接越界读
+    // 数据不足时必须抛异常：assert 在 release 下会被编掉，之后 memcpy 就是
+    // 越界读
     template <std::integral T>
         requires(!std::same_as<T, bool>)
     [[nodiscard]] T peek_integer() const {

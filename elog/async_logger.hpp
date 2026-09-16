@@ -229,7 +229,7 @@ inline void AsyncLogger::run(const std::string &dir,
     while (true) {
         {
             std::unique_lock<std::mutex> lock(cv_mtx_);
-            // 带谓词的等待:done_ 已置位时立即返回。原来无谓词的 wait_for
+            // 带谓词的等待:done_ 已置位时立即返回，没有谓词的 wait_for
             // 只要错过通知就要空等一整个 flush_interval,短命 logger 的
             // 析构因此会卡住数秒。
             cv_.wait_for(lock, flush_interval, [this] {

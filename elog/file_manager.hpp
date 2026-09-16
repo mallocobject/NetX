@@ -43,7 +43,7 @@ struct FileManager {
     const size_t roll_size_;
     const std::chrono::seconds flush_interval_;
     const size_t check_per_count_;
-    // 与 check_per_count_ 同为 size_t：原来写成 int，比较时触发
+    // 与 check_per_count_ 同为 size_t：混用有符号和无符号比较会触发
     // -Wsign-compare；这个计数只会自增和归零，不会为负
     size_t count_{0};
 

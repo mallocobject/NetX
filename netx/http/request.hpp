@@ -9,7 +9,7 @@ namespace http {
 
 struct Request {
     /// header 名由解析器统一转小写后存入，这里按原文查即可。
-    /// 返回 string_view 而不是 string —— 原来每次取值都白拷一份。
+    /// 返回 string_view：取值不该附带一次拷贝。
     [[nodiscard]] std::string_view header(std::string_view key) const {
         return header_params.get(key);
     }

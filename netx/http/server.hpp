@@ -229,7 +229,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                         auto ws_handler = router_.get_ws_handler(req.url_path);
                         if (ws_handler) {
                             websocket::details::Connection ws_conn(s);
-                            // 进入长连接处理循环；它的结果原来被直接丢掉了
+                            // 进入长连接处理循环。它的结果不能丢：handler 的
+                            // 错误是这里唯一能记下来的地方
                             const auto ws_res = co_await ws_handler(ws_conn);
                             if (!ws_res) {
                                 elog::LOG_WARN("websocket handler error: {}",
@@ -249,7 +250,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                     auto send_res = co_await details::Sender::send(s, res);
                     if (!send_res) {
                         // 写失败多半是对端先走了（EPIPE），属于常态，DEBUG
-                        // 够用；但它不该像原来那样无声消失
+                        // 够用；但它不能无声消失
                         elog::LOG_DEBUG("send failed: {}",
                                         send_res.error().message());
                     }

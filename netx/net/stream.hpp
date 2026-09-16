@@ -116,9 +116,8 @@ class Stream {
     /// 依次写出多段数据，顺序即参数顺序。
     ///
     /// 缓冲为空时用 writev 一次陷入内核把多段全发出去，既不拷贝也少一次
-    /// 系统调用 —— 原来一个响应要 write(head) + write(body) 两次。
-    /// 缓冲非空、或第一次没发完时，剩余部分按顺序追加进缓冲统一 flush，
-    /// 保证字节顺序。
+    /// 系统调用。缓冲非空、或第一次没发完时，剩余部分按顺序追加进缓冲
+    /// 统一 flush，保证字节顺序。
     core::Task<core::Expected<>>
     write_many(std::span<const std::string_view> parts);
 

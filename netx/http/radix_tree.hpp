@@ -52,8 +52,8 @@ struct RadixTree {
         std::unique_ptr<Node> wildcard_node;
     };
 
-    /// 逐段遍历，不分配。原来的 split() 每次都要建一个
-    /// vector<string_view>，而 insert/search 各自只走一遍。
+    /// 逐段遍历，不分配 —— insert/search 各自只走一遍，没必要先把段拆进
+    /// 一个容器。
     /// visit 返回 false 表示提前停下。
     template <typename Visit>
     static void for_each_segment(std::string_view path, Visit &&visit) {

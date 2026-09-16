@@ -40,9 +40,8 @@ class Handle {
     /// 挂起记录的形态。一个 handle 在任一时刻只处于其中一种，所以下面用
     /// 联合体存具体的引用。
     ///
-    /// 这些字段原先在 EventLoop::slots_ 里（一张 unordered_map<HandleId,
-    /// Slot>），挂起/恢复各要插入、删除一条哈希记录，perf 里占到约 15%。
-    /// 而绝大多数调用点手里本来就有 Handle&，把它内联进来这张表就不需要了。
+    /// 内联在 Handle 里而不是集中到 EventLoop 的表里：挂起/恢复是热路径，
+    /// 而绝大多数调用点手里本来就有 Handle&，没必要绕一次查找。
     enum class SlotKind : std::uint8_t { kNone, kReady, kTimer, kEvent };
 
     /// 只在 slot_kind 指明的那一个成员有效。

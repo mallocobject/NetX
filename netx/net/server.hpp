@@ -42,19 +42,17 @@ class Server {
     Stream stream_;
     size_t loop_count_{1};
 
-    // 工作线程的调度器。用 unique_ptr 持有而不是裸指针：原来是存线程里
-    // 局部变量的地址，线程一旦退出就变成悬垂指针。
+    // 工作线程的调度器。必须用 unique_ptr 持有：它们要活得比所绑定的
+    // 线程久，裸指针在线程退出后就悬垂了。
     std::vector<std::unique_ptr<Scheduler>> schedulers_;
     std::mutex mtx_;
     std::vector<std::jthread> loops_;
 
     int idle_fd_[2] = {-1, -1};
 
-    // "不超时"的默认值。原来用 nanoseconds::max()：call_after 算的是
-    // Clock::now() + duration，int64 纳秒再加 max() 直接溢出成负数，截止
-    // 时间落到过去，定时器**立刻**触发。HTTP 层拿它跟 read 赛跑，压测时
-    // 定时器屡屡抢先，一半请求被回 408。
-    // 一年这个量级离溢出边界余量足够，语义上也等同于"不超时"。
+    // "不超时"的哨兵值。不能用 nanoseconds::max()：call_after 算的是
+    // Clock::now() + duration，int64 纳秒再加 max() 会溢出成负数，截止时间
+    // 落到过去，定时器立刻触发而不是"很久以后"。一年离溢出边界余量足够。
     inline static constexpr std::chrono::hours kNoTimeout{24 * 365};
     std::chrono::nanoseconds timeout_{kNoTimeout};
 
@@ -257,9 +255,8 @@ inline void Server::start(this auto &self) {
     // 忽略 SIGPIPE，避免对已关闭连接写入导致进程退出
     std::signal(SIGPIPE, SIG_IGN);
 
-    // EMFILE 自救靠"先关掉预留 fd 腾名额"，可原来没有任何地方开过它们 ——
-    // 那段代码等于空转（close(-1) 直接失败，accept 依旧 EMFILE）。
-    // 调用方可以通过构造函数预置，没给就在这里补上。
+    // EMFILE 自救靠"先关掉预留 fd 腾名额"，所以这里必须保证它们真的开着：
+    // 调用方可以在构造时预置，没给就由 start() 补上。
     if (self.idle_fd_[0] < 0) {
         self.idle_fd_[0] = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
         self.idle_fd_[1] =
