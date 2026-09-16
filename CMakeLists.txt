@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.22)
 project(netx)
 
+# 不指定就选 Release。CMAKE_BUILD_TYPE 留空时 CMake 一个优化选项都不加，
+# 拿到的是事实上的 -O0：这个坑很隐蔽，尤其 examples 这种先编先跑的目标。
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+                 Debug Release RelWithDebInfo MinSizeRel)
+endif()
+
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

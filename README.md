@@ -38,7 +38,8 @@ cmake --build examples/build -j           # examples only
 ```
 
 The build stops with an explicit message if the compiler is too old, rather
-than failing later on a missing `<print>`.
+than failing later on a missing `<print>`. `CMAKE_BUILD_TYPE` defaults to
+`Release`; pass `-DCMAKE_BUILD_TYPE=Debug` for a debug build.
 
 ## Quick Start
 
