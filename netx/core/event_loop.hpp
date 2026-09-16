@@ -36,7 +36,9 @@ class EventLoop {
                 return {};
             }
 
-            loop_.forget_event(handle_id_, event_.fd);
+            // 按 fd 找回 handle：这里拿不到 Handle&（析构路径上协程帧
+            // 可能已经没了），但 fd -> handle 的登记本来就由循环维护着。
+            loop_.forget_event(event_.fd);
             return loop_.epoller_.unregister_event(event_);
         }
 
@@ -46,7 +48,6 @@ class EventLoop {
 
         EventAwaiter(EventAwaiter &&other) noexcept
             : loop_(other.loop_), event_(other.event_),
-              handle_id_(other.handle_id_),
               registered_(std::exchange(other.registered_, false)),
               exp_(std::move(other.exp_)) {
         }
@@ -58,7 +59,6 @@ class EventLoop {
 
             (void)reset();
             event_ = other.event_;
-            handle_id_ = other.handle_id_;
             registered_ = std::exchange(other.registered_, false);
             exp_ = std::move(other.exp_);
             return *this;
@@ -71,7 +71,6 @@ class EventLoop {
         template <Promise P>
         bool await_suspend(std::coroutine_handle<P> coro) {
             auto &promise = coro.promise();
-            handle_id_ = promise.id;
 
             if (auto exp = registered_
                                ? loop_.epoller_.modify_event(event_)
@@ -106,72 +105,106 @@ class EventLoop {
     using Duration = Clock::duration;
     using ms = std::chrono::milliseconds;
 
-    using TimerEntry = std::pair<TimePoint, HandleInfo>;
-
-    /// 一个 handle 的挂起记录。ready / timer / event 三种形态互斥，用一张表
-    /// 统一管理，cancel() 才能做到完备且幂等。
-    struct Slot {
-        enum class Kind : std::uint8_t { kReady, kTimer, kEvent } kind;
-
-        std::list<HandleInfo>::iterator ready{}; // kReady：O(1) 摘除
-        std::set<TimerEntry>::iterator timer{};  // kTimer
-        EventAwaiter *awaiter{nullptr}; // kEvent：撤销 epoll 注册的入口
-    };
+    using Kind = Handle::SlotKind;
 
   private:
     Epoller epoller_{};
 
+    /// fd 的登记项：就绪时要回填给哪个 handle，以及撤销 epoll 注册要找哪个
+    /// awaiter。awaiter 放这里而不是 handle 的槽里 —— 它是 EventLoop 的嵌套
+    /// 类，handle.hpp 里前置声明不了。
+    struct FdOwner {
+        Handle *handle{nullptr};
+        EventAwaiter *awaiter{nullptr};
+    };
+
     std::list<HandleInfo> ready_; // FIFO，可 O(1) 摘除
     std::set<TimerEntry> scheduled_;
-    std::unordered_map<HandleId, Slot> slots_; // 唯一事实来源
-    std::unordered_map<int, Handle *> fd_owner_; // 就绪 fd -> handle，回填用
+    std::unordered_map<int, FdOwner> fd_owner_; // fd -> 回填与注销的入口
+
+    /// 当前持有挂起记录的 handle 数。挂起记录内联在 Handle 里之后，没有
+    /// 一张表可以问"还有没有待办"了，就靠这个计数。
+    size_t pending_{0};
 
   private:
     EventLoop() = default;
 
-    /// 入队并登记记录。同一 id 会被覆盖，所以调用方需要自行判重。
-    void enqueue_ready(Handle &handle) {
-        ready_.push_back({.handle = &handle, .id = handle.id});
-        slots_.insert_or_assign(
-            handle.id,
-            Slot{.kind = Slot::Kind::kReady, .ready = std::prev(ready_.end())});
-    }
-
-    /// 登记一次 epoll 等待：fd -> handle 供事件回填，挂起记录里的 awaiter
-    /// 供 cancel() 撤销注册
-    void remember_event(Handle &handle, int fd, EventAwaiter *awaiter) {
-        fd_owner_.insert_or_assign(fd, &handle);
-        slots_.insert_or_assign(
-            handle.id, Slot{.kind = Slot::Kind::kEvent, .awaiter = awaiter});
-    }
-
-    /// 注销 fd 登记并清掉 kEvent 记录（幂等）
-    void forget_event(HandleId id, int fd) {
-        fd_owner_.erase(fd);
-        if (auto it = slots_.find(id);
-            it != slots_.end() && it->second.kind == Slot::Kind::kEvent) {
-            slots_.erase(it);
+    /// 登记/改写挂起记录。从"无记录"进入时才计数 +1。
+    void mark(Handle &handle, Kind kind) {
+        if (handle.slot_kind == Kind::kNone) {
+            ++pending_;
         }
+        handle.slot_kind = kind;
+    }
+
+    /// 清掉挂起记录。本来就无记录时是空操作。
+    void clear(Handle &handle) {
+        if (handle.slot_kind != Kind::kNone) {
+            handle.slot_kind = Kind::kNone;
+            --pending_;
+        }
+    }
+
+    /// 入队并登记记录。
+    ///
+    /// 不变量：ready_ 里有节点 ⟺ 该 handle 的槽是 kReady。
+    /// 已经在队列里就直接返回 —— 重复入队会让 run() 被调两次，而在一个
+    /// 已完成的协程上再 resume 是未定义行为。
+    void enqueue_ready(Handle &handle) {
+        if (handle.slot_kind == Kind::kReady) {
+            return;
+        }
+
+        ready_.push_back({.handle = &handle, .id = handle.id});
+        mark(handle, Kind::kReady);
+        handle.slot.ready = std::prev(ready_.end());
+    }
+
+    /// 登记一次 epoll 等待：fd -> {handle, awaiter} 供事件回填与撤销注册
+    void remember_event(Handle &handle, int fd, EventAwaiter *awaiter) {
+        fd_owner_.insert_or_assign(fd, FdOwner{&handle, awaiter});
+        mark(handle, Kind::kEvent);
+        handle.slot.fd = fd;
+    }
+
+    /// 按 fd 找回撤销注册的入口
+    [[nodiscard]] EventAwaiter *find_awaiter(int fd) const noexcept {
+        auto it = fd_owner_.find(fd);
+        return (it == fd_owner_.end()) ? nullptr : it->second.awaiter;
+    }
+
+    /// 注销 fd 登记并清掉该 handle 的 kEvent 槽（幂等）。
+    /// 按 fd 而不是按 id：EventAwaiter 的析构路径上只有 fd。
+    void forget_event(int fd) {
+        auto it = fd_owner_.find(fd);
+        if (it == fd_owner_.end()) {
+            return;
+        }
+
+        if (it->second.handle != nullptr &&
+            it->second.handle->slot_kind == Kind::kEvent) {
+            clear(*it->second.handle);
+        }
+        fd_owner_.erase(it);
     }
 
     Expected<> run_once();
 
   public:
-    /// 还有没有待办。ready / timer / epoll 注册全都记在 slots_ 里，所以只看这
-    /// 一张表就够 —— 循环的终止条件不再依赖任何计数器，也就不会再出现"漏减
-    /// 一次计数就死在 poll(-1)"的情况。
+    /// 还有没有待办。挂起记录内联在各自的 Handle 里，pending_ 是它们的
+    /// 计数：mark() 从 kNone 进入时 +1，clear() 归零时 -1。
     [[nodiscard]] bool stopped() const noexcept {
-        return slots_.empty();
+        return pending_ == 0;
     }
 
     /// 该 handle 当前是否有挂起记录（就绪 / 定时 / 等待事件）
     [[nodiscard]] bool pending(const Handle &handle) const noexcept {
-        return slots_.contains(handle.id);
+        return handle.slot_kind != Kind::kNone;
     }
 
     /// 尽快执行一次。幂等：已取消或已有挂起记录的 handle 不会重复入队。
     void call_soon(Handle &handle) {
-        if (handle.cancelled || slots_.contains(handle.id)) {
+        if (handle.cancelled || handle.slot_kind != Kind::kNone) {
             return;
         }
 
@@ -190,15 +223,15 @@ class EventLoop {
     /// 在指定时刻执行。幂等规则同 call_soon，因此同一个 handle 不会同时存在
     /// 多条挂起记录。
     void call_at(TimePoint tp, Handle &handle) {
-        if (handle.cancelled || slots_.contains(handle.id)) {
+        if (handle.cancelled || handle.slot_kind != Kind::kNone) {
             return;
         }
 
         auto [it, inserted] =
             scheduled_.insert({tp, {.handle = &handle, .id = handle.id}});
         (void)inserted;
-        slots_.insert_or_assign(handle.id,
-                                Slot{.kind = Slot::Kind::kTimer, .timer = it});
+        mark(handle, Kind::kTimer);
+        handle.slot.timer = it;
     }
 
     template <typename Rep, typename Period>
@@ -231,27 +264,29 @@ class EventLoop {
     void cancel(Handle &handle) {
         handle.cancelled = true;
 
-        if (auto it = slots_.find(handle.id); it != slots_.end()) {
-            switch (it->second.kind) {
-                using enum Slot::Kind;
-            case kReady:
-                // 排队中：不再执行。它的"结果"由下面的 on_cancel() 交代
-                ready_.erase(it->second.ready);
-                break;
-            case kTimer:
-                scheduled_.erase(it->second.timer);
-                break;
-            case kEvent: {
-                auto *awaiter = it->second.awaiter;
-                slots_.erase(it); // 先销账，下面的入队会以同一 id 建新记录
+        switch (handle.slot_kind) {
+            using enum Kind;
+        case kReady:
+            // 排队中：不再执行。它的"结果"由下面的 on_cancel() 交代
+            ready_.erase(handle.slot.ready);
+            break;
+        case kTimer:
+            scheduled_.erase(handle.slot.timer);
+            break;
+        case kEvent: {
+            auto *awaiter = find_awaiter(handle.slot.fd);
+            clear(handle); // 先销账，下面的入队要建的是新记录
+            if (awaiter != nullptr) {
                 awaiter->on_cancel(); // 注销 fd，并把结果置为 Cancelled
-                // 直接入队（绕开 cancelled 守卫），让它以错误的形式恢复
-                enqueue_ready(handle);
-                return;
             }
-            }
-            slots_.erase(it);
+            // 直接入队（绕开 cancelled 守卫），让它以错误的形式恢复
+            enqueue_ready(handle);
+            return;
         }
+        case kNone:
+            break;
+        }
+        clear(handle);
 
         // 下行：先摘掉这条边，再递归 —— 子任务收尾时会把它清掉（已经是
         // nullptr 就不重复清）并强制唤醒本协程，让它去读取消结果。
@@ -271,27 +306,30 @@ class EventLoop {
     void detach(Handle &handle) noexcept {
         handle.cancelled = true;
 
-        auto it = slots_.find(handle.id);
-        if (it == slots_.end()) {
+        if (handle.slot_kind == Kind::kNone) {
             return;
         }
 
-        switch (it->second.kind) {
-        case Slot::Kind::kReady:
-            ready_.erase(it->second.ready);
+        switch (handle.slot_kind) {
+        case Kind::kReady:
+            ready_.erase(handle.slot.ready);
             break;
-        case Slot::Kind::kTimer:
-            scheduled_.erase(it->second.timer);
+        case Kind::kTimer:
+            scheduled_.erase(handle.slot.timer);
             break;
-        case Slot::Kind::kEvent: {
-            auto *awaiter = it->second.awaiter;
-            slots_.erase(it); // 先销账，reset() 内部还会再查一次
-            (void)awaiter->reset();
+        case Kind::kEvent: {
+            auto *awaiter = find_awaiter(handle.slot.fd);
+            clear(handle); // 先销账，reset() 内部还会再走一次 forget_event
+            if (awaiter != nullptr) {
+                (void)awaiter->reset();
+            }
             return;
         }
+        case Kind::kNone:
+            return;
         }
 
-        slots_.erase(it);
+        clear(handle);
     }
 
     void run_until_complete() {
@@ -327,17 +365,16 @@ inline Expected<> EventLoop::run_once() {
                 .and_then([this](auto &&fds) -> Expected<> {
                     for (int fd : fds) {
                         if (auto it = fd_owner_.find(fd);
-                            it != fd_owner_.end() && it->second) {
-                            auto *handle = it->second;
+                            it != fd_owner_.end() &&
+                            it->second.handle != nullptr) {
+                            auto *handle = it->second.handle;
                             // kEvent -> kReady：fd 就绪了。先在**这里**把内核侧
                             // 的账销掉（而不是等协程恢复时由 ~EventAwaiter
                             // 去销），否则排队中的 handle 还挂在 epoll 上，
                             // 之后把它取消也摘不掉那条注册，fd 再就绪一次
                             // 就把它唤醒了。
-                            if (auto slot = slots_.find(handle->id);
-                                slot != slots_.end() &&
-                                slot->second.kind == Slot::Kind::kEvent) {
-                                (void)slot->second.awaiter->reset();
+                            if (handle->slot_kind == Kind::kEvent) {
+                                (void)it->second.awaiter->reset();
                             }
                             // 已取消的不再被事件唤醒（它欠的是结果，不是继续跑）
                             if (!handle->cancelled) {
@@ -359,7 +396,7 @@ inline Expected<> EventLoop::run_once() {
             break;
         }
         if (info.handle) {
-            // 同一 id 的记录会从 kTimer 覆盖成 kReady，定时器条目本身则由
+            // 这个 handle 的槽会从 kTimer 改写成 kReady；定时器条目本身则由
             // 循环的第三子句 erase 掉
             enqueue_ready(*info.handle);
         }
@@ -369,8 +406,12 @@ inline Expected<> EventLoop::run_once() {
         auto info = std::move(ready_.front());
         ready_.pop_front();
 
-        // 先销记录：run() 里若重新入队，那是全新的一轮，不该被这次销账带走
-        slots_.erase(info.id);
+        // 先销记录：run() 里若重新入队，那是全新的一轮，不该被这次销账带走。
+        // 只销 kReady —— 按不变量此刻它就该是 kReady，加这道判断是为了让
+        // 计数不会因为任何意外的不一致而漂移。
+        if (info.handle != nullptr && info.handle->slot_kind == Kind::kReady) {
+            clear(*info.handle);
+        }
 
         if (info.handle) {
             info.handle->run();

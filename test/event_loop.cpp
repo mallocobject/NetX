@@ -567,3 +567,22 @@ TEST_CASE("call_after 对超大 duration 不会溢出成立即触发", "[event_l
 
     CHECK(log.empty()); // 超大 duration 的超时回调不该被执行
 }
+
+TEST_CASE("对已在就绪队列里的 handle 再 wake 不会执行两次", "[event_loop]") {
+    auto &loop = EventLoop::loop();
+    std::vector<HandleId> log;
+
+    Recorder once{log};
+    loop.call_soon(once);
+    loop.wake(once); // 绕开守卫的强制入队
+
+    loop.run_until_complete();
+
+    // 重复入队会让 run() 被调两次，而在已经跑完的协程上再 resume 是 UB。
+    // 现在 enqueue_ready 认槽：已经在队列里就直接返回。
+    REQUIRE(log.size() == 1);
+    CHECK(log[0] == once.id);
+
+    // 计数也要跟着回到 0，否则 run_until_complete 会挂住
+    CHECK(loop.stopped());
+}
