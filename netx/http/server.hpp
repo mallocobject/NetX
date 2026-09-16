@@ -38,7 +38,17 @@ class Server : public net::details::Server {
     Server &route(const std::string &method,
                   const std::string &path,
                   Handler &&handler) {
-        router_.route(method, path, std::forward<Handler>(handler));
+        if (!router_.route(method, path, std::forward<Handler>(handler))) {
+            // 注册失败只有一种原因：同一位置已经有不同名字的参数段
+            // （/users/:id 与 /users/:name）。这是写错了路由，不能静默吞掉
+            sticky_error_ = core::details::make_error_to_unexpected(
+                                core::details::Error::InvalidOperation)
+                                .error();
+            elog::LOG_ERROR("route {} {}: parameter name conflicts with an "
+                            "existing route",
+                            method,
+                            path);
+        }
         return *this;
     }
 
@@ -49,7 +59,14 @@ class Server : public net::details::Server {
                                           websocket::details::Connection &>,
                      core::Task<core::Expected<>>>
     Server &route(const std::string &path, Handler &&handler) {
-        router_.route(path, std::forward<Handler>(handler));
+        if (!router_.route(path, std::forward<Handler>(handler))) {
+            sticky_error_ = core::details::make_error_to_unexpected(
+                                core::details::Error::InvalidOperation)
+                                .error();
+            elog::LOG_ERROR("route {}: parameter name conflicts with an "
+                            "existing route",
+                            path);
+        }
         return *this;
     }
 

@@ -26,10 +26,19 @@ only third-party dependency is OpenSSL (WebSocket handshake).
 
 ## Build
 
+Requires **GCC 14 or newer** — `elog` uses C++23 `std::print`, which GCC only
+ships from 14. On a system where `c++` is older, point CMake at the right one:
+
 ```bash
-cmake -S . -B build && cmake --build build -j        # builds elog/netx, test1 and all examples
-cmake -S examples -B examples/build && cmake --build examples/build -j  # examples-only
+cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-14
+cmake --build build -j                    # elog, netx, netx_test and all examples
+
+cmake -S examples -B examples/build -DCMAKE_CXX_COMPILER=g++-14
+cmake --build examples/build -j           # examples only
 ```
+
+The build stops with an explicit message if the compiler is too old, rather
+than failing later on a missing `<print>`.
 
 ## Quick Start
 
@@ -105,7 +114,7 @@ Core coroutine primitives: `Task<T>`, `Expected<T>`, `sleep`, `when_any`,
 ## Logging
 
 ```bash
-ELOG_PATH=/absolute/log/dir ELOG_LEVEL=INFO ./build/test/test1
+ELOG_PATH=/absolute/log/dir ELOG_LEVEL=INFO ./build/test/netx_test
 ```
 
 `ELOG_PATH` sets the log directory (missing directories degrade to terminal-only
