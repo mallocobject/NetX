@@ -12,6 +12,8 @@
 #include "netx/net/stream.hpp"
 #include "netx/websocket/handshake.hpp"
 #include <cassert>
+#include <cstddef>
+#include <string_view>
 #include <utility>
 namespace netx {
 namespace http {
@@ -109,10 +111,16 @@ class Server : public net::details::Server {
 inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                                                           int write_fd) {
 
-    elog::LOG_DEBUG("handle_client start fd={}", read_fd);
+    elog::LOG_DEBUG("new connection fd={}", read_fd);
+
+    // 断开时给一条带原因和请求数的总结。"handle_client end fd=N" 那种写法
+    // 看不出是对端正常关闭、空闲超时、还是出错，排查时等于没有。
+    std::string_view close_reason = "unknown";
+    size_t requests_served = 0;
+
     auto stream_exp = net::details::Stream::create(read_fd, write_fd);
     if (!stream_exp) {
-        elog::LOG_DEBUG("handle_client Stream::create failed fd={}", read_fd);
+        elog::LOG_DEBUG("connection setup failed fd={}", read_fd);
         ::close(read_fd);
         ::close(write_fd);
         co_return {};
@@ -145,8 +153,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
             }
 
             if (idle_timeout) {
-                elog::LOG_DEBUG("Connection idle timeout, closing fd {}",
-                                s.read_fd);
+                close_reason = "idle timeout";
                 co_await s.write(Response{}
                                      .with_status(408)
                                      .keep_alive(false)
@@ -155,8 +162,14 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
             }
 
             if (!read_exp) {
-                if (read_exp.error() != core::details::Error::BrokenPipe) {
-                    elog::LOG_DEBUG("Client read error: {}",
+                // 对端正常关闭也走这里（Buffer 把 EOF 报成 BrokenPipe），
+                // 那不是错误，不必单记一条
+                if (read_exp.error() == core::details::Error::BrokenPipe) {
+                    close_reason = "peer closed";
+                } else {
+                    close_reason = "read error";
+                    elog::LOG_DEBUG("read error fd={}: {}",
+                                    read_fd,
                                     read_exp.error().message());
                 }
                 break;
@@ -165,6 +178,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
             bool should_close = false;
             while (s.read_buf.readable_bytes() > 0) {
                 if (!session.parse(s.read_buf)) {
+                    close_reason = "bad request";
                     // co_await s.write("HTTP/1.1 400 Bad Request\r\nConnection:
                     // " 				 "close\r\n\r\n");
                     co_await s.write(Response{}
@@ -181,6 +195,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                     auto res_exp = co_await router_.dispatch(req);
 
                     if (!res_exp) {
+                        close_reason = "handler error";
                         const std::error_code &ec = res_exp.error();
                         elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
                         // co_await s.write(
@@ -239,14 +254,18 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                                         send_res.error().message());
                     }
                     if (!send_res || !is_keep) {
+                        close_reason =
+                            send_res ? "keep-alive off" : "send failed";
                         should_close = true;
                         break;
                     }
 
+                    ++requests_served;
                     session.clear();
                     s.read_buf.try_shrink();
                     s.write_buf.try_shrink();
                 } else {
+                    // 报文还没收全，等下一轮数据
                     break;
                 }
             }
@@ -255,11 +274,15 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
             }
         }
     } catch (const std::exception &e) {
+        close_reason = "exception";
         elog::LOG_ERROR("Exception in handleClient: {}", e.what());
     }
 
     co_await s.shutdown();
-    elog::LOG_DEBUG("handle_client end fd={}", read_fd);
+    elog::LOG_DEBUG("connection closed fd={} reason={} requests={}",
+                    read_fd,
+                    close_reason,
+                    requests_served);
     co_return {};
 }
 } // namespace http
