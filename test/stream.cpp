@@ -17,10 +17,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <poll.h>
 #include <string>
 #include <thread>
 
@@ -299,4 +301,138 @@ TEST_CASE("读写共用同一个 fd 时 close 只关一次", "[net][stream]") {
 
     // 关两次的话第二次会命中 EBADF（甚至关掉已被复用的新 fd）
     CHECK(stream->close().has_value());
+}
+
+TEST_CASE("write_many 按参数顺序把多段一次写出", "[net][stream]") {
+    SocketPair pair;
+    REQUIRE(pair.a != -1);
+    const int rfd = pair.b;
+
+    auto stream = Stream::create(pair.a, ::dup(pair.a));
+    REQUIRE(stream.has_value());
+    pair.release_a();
+
+    const std::array<std::string_view, 3> parts{"GET ", "/x", " HTTP/1.1"};
+    const auto result = async_main(stream->write_many(parts));
+    REQUIRE(result.has_value());
+
+    std::string got(64, '\0');
+    const ssize_t n = ::read(rfd, got.data(), got.size());
+    REQUIRE(n > 0);
+    got.resize(static_cast<size_t>(n));
+    CHECK(got == "GET /x HTTP/1.1"); // 顺序就是参数顺序
+}
+
+TEST_CASE("write_many 跳过空段", "[net][stream]") {
+    SocketPair pair;
+    REQUIRE(pair.a != -1);
+    const int rfd = pair.b;
+
+    auto stream = Stream::create(pair.a, ::dup(pair.a));
+    REQUIRE(stream.has_value());
+    pair.release_a();
+
+    const std::array<std::string_view, 4> parts{"a", "", "b", ""};
+    const auto result = async_main(stream->write_many(parts));
+    REQUIRE(result.has_value());
+
+    std::string got(16, '\0');
+    const ssize_t n = ::read(rfd, got.data(), got.size());
+    REQUIRE(n > 0);
+    got.resize(static_cast<size_t>(n));
+    CHECK(got == "ab");
+}
+
+TEST_CASE("write_many 遇到写不下的部分会折进缓冲并等可写", "[net][stream]") {
+    SocketPair pair;
+    REQUIRE(pair.a != -1);
+    const int rfd = pair.b;
+
+    auto stream = Stream::create(pair.a, ::dup(pair.a));
+    REQUIRE(stream.has_value());
+    pair.release_a();
+
+    // 1MB 远超 socketpair 的内核缓冲，必然触发 EAGAIN —— 走"剩余折进
+    // write_buf 再等可写"那条路，而不是把数据丢掉或写乱序
+    const std::string big(1024 * 1024, 'x');
+    const std::array<std::string_view, 2> parts{"head|", big};
+
+    auto writer = [&]() -> netx::core::Task<netx::core::Expected<>> {
+        co_return co_await stream->write_many(parts);
+    };
+
+    // 边写边读，否则对端不排空、写端会一直等
+    std::string drained;
+    drained.reserve(big.size() + 8);
+    std::thread reader{[&] {
+        std::array<char, 65536> buf{};
+        while (drained.size() < big.size() + 5) {
+            // 两端都是 SOCK_NONBLOCK 建的，没数据时 read 返回 EAGAIN 而不是
+            // 阻塞等待 —— 直接 break 就停止排空了，写端会永远等下去。
+            pollfd pfd{.fd = rfd, .events = POLLIN, .revents = 0};
+            if (::poll(&pfd, 1, 200) <= 0) {
+                continue;
+            }
+            const ssize_t n = ::read(rfd, buf.data(), buf.size());
+            if (n > 0) {
+                drained.append(buf.data(), static_cast<size_t>(n));
+            } else if (n == 0) {
+                break;
+            }
+        }
+    }};
+
+    const auto result = async_main(writer());
+    reader.join();
+
+    REQUIRE(result.has_value());
+    REQUIRE(drained.size() == big.size() + 5);
+    CHECK(drained.starts_with("head|"));
+    CHECK(drained.substr(5) == big);
+}
+
+TEST_CASE("write_many 在缓冲有积压时保持字节顺序", "[net][stream]") {
+    SocketPair pair;
+    REQUIRE(pair.a != -1);
+    const int rfd = pair.b;
+
+    auto stream = Stream::create(pair.a, ::dup(pair.a));
+    REQUIRE(stream.has_value());
+    pair.release_a();
+
+    // 先塞一大块把写缓冲撑满，让 write_buf 里有积压
+    const std::string filler(1024 * 1024, 'F');
+    std::string drained;
+    std::thread reader{[&] {
+        std::array<char, 65536> buf{};
+        while (drained.size() < filler.size() + 4) {
+            // 两端都是 SOCK_NONBLOCK 建的，没数据时 read 返回 EAGAIN 而不是
+            // 阻塞等待 —— 直接 break 就停止排空了，写端会永远等下去。
+            pollfd pfd{.fd = rfd, .events = POLLIN, .revents = 0};
+            if (::poll(&pfd, 1, 200) <= 0) {
+                continue;
+            }
+            const ssize_t n = ::read(rfd, buf.data(), buf.size());
+            if (n > 0) {
+                drained.append(buf.data(), static_cast<size_t>(n));
+            } else if (n == 0) {
+                break;
+            }
+        }
+    }};
+
+    auto body = [&]() -> netx::core::Task<netx::core::Expected<>> {
+        co_await co_await stream->write(filler);
+        const std::array<std::string_view, 2> parts{"AA", "BB"};
+        co_await co_await stream->write_many(parts);
+        co_return {};
+    };
+
+    const auto result = async_main(body());
+    reader.join();
+
+    REQUIRE(result.has_value());
+    REQUIRE(drained.size() == filler.size() + 4);
+    CHECK(drained.starts_with("FFFF"));
+    CHECK(drained.ends_with("AABB")); // 追加在积压之后，没有插队
 }

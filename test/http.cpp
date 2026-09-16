@@ -5,6 +5,7 @@
 //   radix_tree.hpp —— 路由匹配与路径归一化（安全相关）
 //   response.hpp   —— 响应头拼装
 
+#include "netx/http/field_map.hpp"
 #include "netx/http/parser.hpp"
 #include "netx/http/radix_tree.hpp"
 #include "netx/http/response.hpp"
@@ -13,6 +14,7 @@
 
 #include <string>
 
+using netx::http::FieldMap;
 using netx::http::Response;
 using netx::http::details::Parser;
 using netx::http::details::RadixTree;
@@ -85,6 +87,59 @@ TEST_CASE("body 分多次喂入也能解析完", "[http][parser]") {
     REQUIRE(p.parse("56789"));
     CHECK(p.completed());
     CHECK(p.req.body == "0123456789");
+}
+
+TEST_CASE("feed 在报文边界停下，剩下的留给下一个请求", "[http][parser]") {
+    Parser p;
+    const std::string two = "GET /a HTTP/1.1\r\n\r\nGET /b HTTP/1.1\r\n\r\n";
+
+    const auto first = p.feed(two);
+    REQUIRE(first.has_value());
+    CHECK(*first == two.find("GET /b")); // 一个字节都不多吃
+    CHECK(p.completed());
+    CHECK(p.req.url_path == "/a");
+
+    // 剩下的接着喂
+    p.clear();
+    const auto second = p.feed(std::string_view{two}.substr(*first));
+    REQUIRE(second.has_value());
+    CHECK(p.completed());
+    CHECK(p.req.url_path == "/b");
+}
+
+TEST_CASE("feed 对不完整输入返回已消费长度而不是报错", "[http][parser]") {
+    Parser p;
+    const std::string partial = "GET /abc HTTP/1.1\r\nHost: x";
+
+    const auto n = p.feed(partial);
+    REQUIRE(n.has_value());
+    CHECK(*n == partial.size()); // 残缺的字段先攒着，等后续数据
+    CHECK_FALSE(p.completed());
+    CHECK(p.req.method == "GET");
+    CHECK(p.req.url_path == "/abc");
+    // header 要等本行的 '\r' 出现才入库，此刻它还在 tmp_value_ 里攒着
+    CHECK(p.req.header("host").empty());
+
+    // 补齐剩下的字节就能收尾
+    REQUIRE(p.feed("\r\n\r\n").has_value());
+    CHECK(p.completed());
+    CHECK(p.req.header("host") == "x");
+}
+
+TEST_CASE("Content-Length 必须整个都是数字", "[http][parser]") {
+    // stoul 会接受 "5abc" 的前缀，from_chars 不会 —— 这类值必须判非法
+    Parser a;
+    CHECK_FALSE(a.parse("POST / HTTP/1.1\r\nContent-Length: 5abc\r\n\r\n"));
+
+    Parser b;
+    CHECK_FALSE(b.parse("POST / HTTP/1.1\r\nContent-Length: -1\r\n\r\n"));
+
+    Parser c;
+    CHECK_FALSE(c.parse("POST / HTTP/1.1\r\nContent-Length: \r\n\r\n"));
+
+    Parser d;
+    CHECK(d.parse("POST / HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc"));
+    CHECK(d.req.body == "abc");
 }
 
 TEST_CASE("请求行不合规时报错", "[http][parser]") {
@@ -233,8 +288,8 @@ TEST_CASE("header 键里的高位字节原样保留", "[http][parser]") {
 
 TEST_CASE("静态路由精确匹配", "[http][radix]") {
     RadixTree<int> tree;
-    tree.insert("/a/b", 1);
-    tree.insert("/a/c", 2);
+    REQUIRE(tree.insert("/a/b", 1));
+    REQUIRE(tree.insert("/a/c", 2));
 
     CHECK(tree.search("/a/b").value != nullptr);
     CHECK(*tree.search("/a/b").value == 1);
@@ -245,14 +300,14 @@ TEST_CASE("静态路由精确匹配", "[http][radix]") {
 
 TEST_CASE("根路由 /", "[http][radix]") {
     RadixTree<int> tree;
-    tree.insert("/", 7);
+    REQUIRE(tree.insert("/", 7));
     REQUIRE(tree.search("/").value != nullptr);
     CHECK(*tree.search("/").value == 7);
 }
 
 TEST_CASE("参数路由 :id 能捕获段并放进 params", "[http][radix]") {
     RadixTree<int> tree;
-    tree.insert("/users/:id", 1);
+    REQUIRE(tree.insert("/users/:id", 1));
 
     auto m = tree.search("/users/42");
     REQUIRE(m.value != nullptr);
@@ -262,16 +317,42 @@ TEST_CASE("参数路由 :id 能捕获段并放进 params", "[http][radix]") {
 
 TEST_CASE("静态段优先于参数段", "[http][radix]") {
     RadixTree<int> tree;
-    tree.insert("/users/:id", 1);
-    tree.insert("/users/me", 2);
+    REQUIRE(tree.insert("/users/:id", 1));
+    REQUIRE(tree.insert("/users/me", 2));
 
     CHECK(*tree.search("/users/me").value == 2); // 静态优先
     CHECK(*tree.search("/users/99").value == 1); // 落到参数
 }
 
+TEST_CASE("同一位置不同名的参数段判为冲突", "[http][radix]") {
+    RadixTree<int> tree;
+    REQUIRE(tree.insert("/users/:id", 1));
+
+    // 一个节点只能有一个参数名。原实现把名字存在父节点上，第二次注册会
+    // 直接覆盖，于是 /users/:id 取到的键名变成了 "name"。
+    CHECK_FALSE(tree.insert("/users/:name", 2));
+
+    // 冲突不影响已经注册好的那条
+    auto m = tree.search("/users/42");
+    REQUIRE(m.value != nullptr);
+    CHECK(m.params.at("id") == "42");
+    CHECK(m.params.count("name") == 0);
+}
+
+TEST_CASE("同名参数段可以重复注册（后注册的覆盖处理函数）", "[http][radix]") {
+    RadixTree<int> tree;
+    REQUIRE(tree.insert("/u/:id", 1));
+    REQUIRE(tree.insert("/u/:id", 2));
+
+    auto m = tree.search("/u/7");
+    REQUIRE(m.value != nullptr);
+    CHECK(*m.value == 2);
+    CHECK(m.params.at("id") == "7");
+}
+
 TEST_CASE("通配符 * 吃掉剩余所有段", "[http][radix]") {
     RadixTree<int> tree;
-    tree.insert("/static/*", 1);
+    REQUIRE(tree.insert("/static/*", 1));
 
     REQUIRE(tree.search("/static/a/b/c").value != nullptr);
     CHECK(*tree.search("/static/a/b/c").value == 1);
@@ -302,6 +383,30 @@ TEST_CASE("normalize_path 不会让 .. 逃出根目录", "[http][radix]") {
         CHECK(out.starts_with('/'));
         CHECK(out.find("..") == std::string::npos);
     }
+}
+
+TEST_CASE("normalize_in_place 就地做，结果与 normalize_path 一致",
+          "[http][radix]") {
+    // 就地版本只删不增，不需要额外分配；两条路径必须给出相同结果
+    for (const char *raw : {"/a/./b",
+                            "/a/b/../c",
+                            "/a//b",
+                            "/a/b/",
+                            "",
+                            "/",
+                            "/../../etc/passwd",
+                            "/a/../../../x",
+                            "/..",
+                            "/x/y/./z/../w"}) {
+        std::string in_place = raw;
+        RadixTree<int>::normalize_in_place(in_place);
+        CHECK(in_place == RadixTree<int>::normalize_path(raw));
+    }
+
+    // 不以 '/' 开头时补一个前导斜杠
+    std::string rel = "a/b";
+    RadixTree<int>::normalize_in_place(rel);
+    CHECK(rel == "/a/b");
 }
 
 TEST_CASE("normalize_path 挡住超长路径和内嵌 NUL", "[http][radix]") {
@@ -357,4 +462,111 @@ TEST_CASE("with_file 按后缀推断 MIME 类型", "[http][response]") {
           "image/png");
     CHECK(Response{}.with_file("/x/a.bin").header_params_.at("Content-Type") ==
           "application/octet-stream");
+}
+
+// --------------------------------------------------------------- FieldMap
+
+TEST_CASE("FieldMap 保留插入顺序并且覆盖不换位置", "[http][field_map]") {
+    FieldMap m;
+    CHECK(m.empty());
+
+    m["b"] = "2";
+    m["a"] = "1";
+    CHECK(m.size() == 2);
+    CHECK(m.get("a") == "1");
+    CHECK(m.get("nope").empty()); // 不存在给空串
+    CHECK(m.at("b") == "2");
+    CHECK_THROWS_AS(m.at("nope"), std::out_of_range);
+    CHECK(m.contains("a"));
+    CHECK(m.count("a") == 1);
+    CHECK(m.count("zzz") == 0);
+
+    std::string order;
+    for (const auto &[k, v] : m) {
+        order += k;
+    }
+    CHECK(order == "ba"); // 插入顺序，不是字典序
+
+    m["b"] = "9"; // 覆盖
+    order.clear();
+    for (const auto &[k, v] : m) {
+        order += k;
+    }
+    CHECK(order == "ba");
+    CHECK(m.size() == 2);
+    CHECK(m.get("b") == "9");
+
+    m.clear();
+    CHECK(m.empty());
+}
+
+TEST_CASE("单个字段表能存多个同名键", "[http][field_map]") {
+    // 同名 header 是合法的，unordered_map 存不下
+    FieldMap m;
+    m["set-cookie"] = "a=1";
+    m["x-other"] = "z";
+    CHECK(m.size() == 2);
+    CHECK(m.get("set-cookie") == "a=1");
+}
+
+// -------------------------------------------------------------- Response
+
+TEST_CASE("响应头按插入顺序输出", "[http][response]") {
+    // 原实现用 unordered_map，遍历顺序是实现定义的 —— 每次跑都可能不一样，
+    // 既没法断言也没法复现客户端的解析问题
+    const Response res = Response{}
+                             .with_status(200)
+                             .with_header("Z-Last", "1")
+                             .with_header("A-First", "2")
+                             .with_header("M-Mid", "3");
+
+    const std::string head = res.to_head_string();
+    const size_t z = head.find("Z-Last");
+    const size_t a = head.find("A-First");
+    const size_t m = head.find("M-Mid");
+    REQUIRE(z != std::string::npos);
+    REQUIRE(a != std::string::npos);
+    REQUIRE(m != std::string::npos);
+    CHECK(z < a);
+    CHECK(a < m);
+}
+
+TEST_CASE("with_header 覆盖同名而不是追加", "[http][response]") {
+    const Response res = Response{}
+                             .with_status(200)
+                             .with_header("X-A", "1")
+                             .with_header("X-A", "2");
+    CHECK(res.header_params_.size() == 1);
+    CHECK(res.header_params_.at("X-A") == "2");
+}
+
+TEST_CASE("扩展名只取最后一段，带点的目录名不误判", "[http][response]") {
+    CHECK(Response{}
+              .with_file("/x/index.html")
+              .header_params_.at("Content-Type") == "text/html; charset=utf-8");
+    CHECK(Response{}.with_file("/x/a.json").header_params_.at("Content-Type") ==
+          "application/json; charset=utf-8");
+    CHECK(Response{}.with_file("/x/a.webp").header_params_.at("Content-Type") ==
+          "image/webp");
+    // 目录名里带 .html，但文件本身没有扩展名
+    CHECK(Response{}
+              .with_file("/a.html/file")
+              .header_params_.at("Content-Type") == "application/octet-stream");
+    CHECK(Response{}.with_file("/x/noext").header_params_.at("Content-Type") ==
+          "application/octet-stream");
+}
+
+TEST_CASE("with_body 接受字面量、string 与 string_view", "[http][response]") {
+    CHECK(Response{}.with_body("lit").body == "lit");
+
+    const std::string owned = "owned";
+    CHECK(Response{}.with_body(owned).body == "owned");
+    CHECK(Response{}.with_body(std::string{"moved"}).body == "moved");
+
+    const std::string_view view = "view";
+    CHECK(Response{}.with_body(view).body == "view");
+
+    // Content-Length 跟着 body 走
+    CHECK(Response{}.with_body("hello").header_params_.at("Content-Length") ==
+          "5");
 }

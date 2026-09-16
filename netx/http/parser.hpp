@@ -1,18 +1,32 @@
 #pragma once
 
 #include "netx/http/request.hpp"
+#include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
+
 namespace netx {
 namespace http {
 namespace details {
+
+/// HTTP/1.x 请求解析器。
+///
+/// 按"状态 + 整段扫描"实现：每个状态在自己的输入里找结束符，把中间那一段
+/// 一次性追加上去。原实现逐字节 `+=` 到 std::string（perf 里
+/// string::push_back 占 3.6%、consume 占 2.5%），而且每加几个字符就可能触发
+/// 一次扩容。
+///
+/// 一次 feed 最多解析一个完整报文 —— 报文边界就是调用方需要的边界：流水线
+/// 里剩下的字节属于下一个请求，必须留在缓冲区里。
 struct Parser {
-    // 各字段的长度上限。原来只有 url_path 和 body 有上限，method 与
-    // header 完全没有 —— 客户端发 20 万字节的 header key、1 万个 header
-    // 行，服务端都会照单全收，内存随请求线性增长。
-    inline static constexpr size_t kMaxMethodLen = 16;      // 最长标准方法 CONNECT
+    // 各字段的长度上限。客户端能用超长字段把服务端内存吃光，所以 method、
+    // version、header 键值、查询串都要有上限，不能只有 url_path 和 body。
+    inline static constexpr size_t kMaxMethodLen = 16; // 最长标准方法 CONNECT
     inline static constexpr size_t kMaxVersionLen = 16;
     inline static constexpr size_t kMaxUrlPathLen = 1024;
     inline static constexpr size_t kMaxQueryKeyLen = 1024;
@@ -58,22 +72,17 @@ struct Parser {
         req.clear();
     }
 
-    void append_body(const char *data, size_t len) {
-        req.body.append(data, len);
-        body_remaining_ -= len;
-    }
+    /// 扫描一段数据。
+    ///
+    /// 返回吃掉的字节数：报文已经结束（kComplete）时可能小于 chunk.size()，
+    /// 剩下的属于下一个请求。返回 nullopt 表示语法错误，调用方应当回 400
+    /// 并关闭连接。
+    std::optional<size_t> feed(std::string_view chunk);
 
+    /// 喂完一整段，只看合不合法。
     bool parse(const std::string &data) {
-        for (char c : data) {
-            if (!consume(c)) {
-                return false;
-            }
-        }
-
-        return true;
+        return feed(data).has_value();
     }
-
-    bool consume(char c);
 
     Parser() = default;
     Parser(Parser &&) = default;
@@ -88,187 +97,267 @@ struct Parser {
     size_t body_remaining_{0};
 };
 
-inline bool Parser::consume(char c) {
-    switch (state) {
-    case State::kStart:
-        // ctype 系列只接受 EOF 或 unsigned char 范围内的值：直接传 char
-        // 时，>= 0x80 的字节会变成负数，是未定义行为
-        if (std::isalpha(static_cast<unsigned char>(c))) {
-            req.method += c;
-            state = State::kMethod;
-        } else if (c != '\r' && c != '\n') {
-            return false;
-        }
-        break;
+inline std::optional<size_t> Parser::feed(std::string_view chunk) {
+    constexpr size_t npos = std::string_view::npos;
+    const size_t n = chunk.size();
+    size_t i = 0;
 
-    case State::kMethod:
-        if (c == ' ') {
-            state = State::kPath;
-        } else if (c == '\r' || c == '\n' || req.method.size() >= kMaxMethodLen) {
-            // 请求行是 "METHOD SP PATH SP VERSION CRLF"。method 里出现 CR/LF
-            // 说明这行根本不是请求行；再加上长度上限，才不会让一段没有空格
-            // 的垃圾把连接拖住。
-            return false;
-        } else {
-            req.method += c;
-        }
-        break;
-
-    case State::kPath:
-        if (req.url_path.size() > kMaxUrlPathLen) {
-            return false;
-        }
-
-        if (c == '?') {
-            state = State::kQueryKey;
-        } else if (c == '#') {
-            state = State::kFragment;
-        } else if (c == ' ') {
-            state = State::kVersion;
-        } else {
-            req.url_path += c;
-        }
-        break;
-
-    case State::kQueryKey:
-        if (c == '=') {
-            state = State::kQueryValue;
-        } else if (c == ' ') {
-            state = State::kVersion;
-        } else if (tmp_key_.size() >= kMaxQueryKeyLen) {
-            return false;
-        } else {
-            tmp_key_ += c;
-        }
-        break;
-
-    case State::kQueryValue:
-        if (c == '&') {
-            req.query_params[tmp_key_] = tmp_value_;
-            tmp_key_.clear();
-            tmp_value_.clear();
-            state = State::kQueryKey;
-        } else if (c == '#') {
-            req.query_params[tmp_key_] = tmp_value_;
-            tmp_key_.clear();
-            tmp_value_.clear();
-            state = State::kFragment;
-        } else if (c == ' ') {
-            req.query_params[tmp_key_] = tmp_value_;
-            tmp_key_.clear();
-            tmp_value_.clear();
-            state = State::kVersion;
-        } else if (tmp_value_.size() >= kMaxQueryValueLen) {
-            return false;
-        } else {
-            tmp_value_ += c;
-        }
-        break;
-
-    case State::kFragment:
-        if (c == ' ') {
-            state = State::kVersion;
-        }
-        break;
-
-    case State::kVersion:
-        if (c == '\r') {
-            state = State::kExpectLfAfterStatusLine;
-        } else if (req.version.size() >= kMaxVersionLen) {
-            return false;
-        } else {
-            req.version += c;
-        }
-        break;
-
-    case State::kExpectLfAfterStatusLine:
-        if (c == '\n') {
-            state = State::kHeaderKey;
-        } else {
-            return false;
-        }
-        break;
-
-    case State::kHeaderKey:
-        if (c == ':') {
-            state = State::kHeaderValue;
-        } else if (c == '\r') {
-            state = State::kExpectDoubleLf;
-        } else if (tmp_key_.size() >= kMaxHeaderKeyLen) {
-            return false;
-        } else {
-            tmp_key_ +=
-                static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-        break;
-
-    case State::kHeaderValue:
-        if (c == ' ' && tmp_value_.empty()) {
-            break;
-        }
-        if (c == '\r') {
-            // header 条数也要有上限：一条请求里塞 1 万个 header 同样能把
-            // 内存吃光
-            if (req.header_params.size() >= kMaxHeaderCount) {
+    // 追加一段并对累计长度设限
+    const auto append_capped =
+        [](std::string &dst, std::string_view sv, size_t cap) {
+            if (dst.size() + sv.size() > cap) {
                 return false;
             }
+            dst.append(sv);
+            return true;
+        };
 
+    while (i < n) {
+        switch (state) {
+        case State::kStart:
+            // 报文之间允许夹前导 CR/LF；第一个可见字节必须是方法名的字母
+            while (i < n && (chunk[i] == '\r' || chunk[i] == '\n')) {
+                ++i;
+            }
+            if (i == n) {
+                return i;
+            }
+            if (!std::isalpha(static_cast<unsigned char>(chunk[i]))) {
+                return std::nullopt;
+            }
+            state = State::kMethod;
+            break;
+
+        case State::kMethod: {
+            const size_t end = chunk.find_first_of(" \r\n", i);
+            const size_t stop = (end == npos) ? n : end;
+            if (!append_capped(
+                    req.method, chunk.substr(i, stop - i), kMaxMethodLen)) {
+                return std::nullopt;
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            if (chunk[i] != ' ') {
+                // 请求行是 "METHOD SP PATH SP VERSION CRLF"：这里出现
+                // CR/LF 说明整行根本不是请求行
+                return std::nullopt;
+            }
+            ++i;
+            state = State::kPath;
+            break;
+        }
+
+        case State::kPath: {
+            const size_t end = chunk.find_first_of("?# ", i);
+            const size_t stop = (end == npos) ? n : end;
+            if (!append_capped(
+                    req.url_path, chunk.substr(i, stop - i), kMaxUrlPathLen)) {
+                return std::nullopt;
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            const char c = chunk[i++];
+            if (c == '?') {
+                state = State::kQueryKey;
+            } else if (c == '#') {
+                state = State::kFragment;
+            } else {
+                state = State::kVersion;
+            }
+            break;
+        }
+
+        case State::kQueryKey: {
+            const size_t end = chunk.find_first_of("= ", i);
+            const size_t stop = (end == npos) ? n : end;
+            if (!append_capped(
+                    tmp_key_, chunk.substr(i, stop - i), kMaxQueryKeyLen)) {
+                return std::nullopt;
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            // 没有 '=' 就直接进版本号，这对键值不作数
+            state = (chunk[i] == '=') ? State::kQueryValue : State::kVersion;
+            ++i;
+            break;
+        }
+
+        case State::kQueryValue: {
+            const size_t end = chunk.find_first_of("&# ", i);
+            const size_t stop = (end == npos) ? n : end;
+            if (!append_capped(
+                    tmp_value_, chunk.substr(i, stop - i), kMaxQueryValueLen)) {
+                return std::nullopt;
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            req.query_params[tmp_key_] = tmp_value_;
+            tmp_key_.clear();
+            tmp_value_.clear();
+            const char c = chunk[i++];
+            if (c == '&') {
+                state = State::kQueryKey;
+            } else if (c == '#') {
+                state = State::kFragment;
+            } else {
+                state = State::kVersion;
+            }
+            break;
+        }
+
+        case State::kFragment: {
+            // 片段内容整段丢掉，只等分隔版本号的那个空格
+            const size_t sp = chunk.find(' ', i);
+            if (sp == npos) {
+                return n;
+            }
+            i = sp + 1;
+            state = State::kVersion;
+            break;
+        }
+
+        case State::kVersion: {
+            const size_t cr = chunk.find('\r', i);
+            const size_t stop = (cr == npos) ? n : cr;
+            if (!append_capped(
+                    req.version, chunk.substr(i, stop - i), kMaxVersionLen)) {
+                return std::nullopt;
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            ++i; // 吃掉 '\r'
+            state = State::kExpectLfAfterStatusLine;
+            break;
+        }
+
+        case State::kExpectLfAfterStatusLine:
+            if (chunk[i] != '\n') {
+                return std::nullopt;
+            }
+            ++i;
+            state = State::kHeaderKey;
+            break;
+
+        case State::kHeaderKey: {
+            const size_t end = chunk.find_first_of(":\r", i);
+            const size_t stop = (end == npos) ? n : end;
+            const size_t before = tmp_key_.size();
+            if (!append_capped(
+                    tmp_key_, chunk.substr(i, stop - i), kMaxHeaderKeyLen)) {
+                return std::nullopt;
+            }
+            // 先整段追加再就地转小写：header 名大小写不敏感，逐字节 tolower
+            // 又回到一个字符一次调用的老路上了
+            for (size_t k = before; k < tmp_key_.size(); ++k) {
+                tmp_key_[k] = static_cast<char>(
+                    std::tolower(static_cast<unsigned char>(tmp_key_[k])));
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            const char c = chunk[i++];
+            // ':' 进值；'\r' 说明这一行是空的，头部到此结束
+            state = (c == ':') ? State::kHeaderValue : State::kExpectDoubleLf;
+            break;
+        }
+
+        case State::kHeaderValue: {
+            if (tmp_value_.empty()) {
+                // 值前面的空白整段跳过
+                const size_t j = chunk.find_first_not_of(" \t", i);
+                if (j == npos) {
+                    return n;
+                }
+                i = j;
+            }
+            const size_t cr = chunk.find('\r', i);
+            const size_t stop = (cr == npos) ? n : cr;
+            if (!append_capped(tmp_value_,
+                               chunk.substr(i, stop - i),
+                               kMaxHeaderValueLen)) {
+                return std::nullopt;
+            }
+            i = stop;
+            if (i == n) {
+                return i;
+            }
+            if (req.header_params.size() >= kMaxHeaderCount) {
+                return std::nullopt;
+            }
             req.header_params[tmp_key_] = tmp_value_;
             tmp_key_.clear();
             tmp_value_.clear();
+            ++i; // 吃掉 '\r'
             state = State::kExpectLfAfterHeader;
-        } else if (tmp_value_.size() >= kMaxHeaderValueLen) {
-            return false;
-        } else {
-            tmp_value_ += c;
+            break;
         }
-        break;
 
-    case State::kExpectLfAfterHeader:
-        if (c == '\n') {
+        case State::kExpectLfAfterHeader:
+            if (chunk[i] != '\n') {
+                return std::nullopt;
+            }
+            ++i;
             state = State::kHeaderKey;
-        } else {
-            return false;
+            break;
+
+        case State::kExpectDoubleLf: {
+            if (chunk[i] != '\n') {
+                return std::nullopt;
+            }
+            ++i;
+
+            auto it = req.header_params.find("content-length");
+            if (it == req.header_params.end()) {
+                state = State::kComplete;
+                break;
+            }
+
+            // from_chars 比 stoul 合适：不抛异常、不看 locale，而且能顺带
+            // 确认整个值都被消费掉了（"5abc" 必须算非法）
+            unsigned long long len = 0;
+            const char *first = it->second.data();
+            const char *last = first + it->second.size();
+            const auto [ptr, ec] = std::from_chars(first, last, len);
+            if (ec != std::errc{} || ptr != last || len > kMaxBodyLen) {
+                return std::nullopt;
+            }
+
+            body_remaining_ = static_cast<size_t>(len);
+            req.body.reserve(body_remaining_);
+            state = (body_remaining_ > 0) ? State::kBody : State::kComplete;
+            break;
         }
-        break;
 
-    case State::kExpectDoubleLf:
-        if (c == '\n') {
-            // 检查是否有 Content-Length 决定是否需要解析 Body
-            if (auto it = req.header_params.find("content-length");
-                it != req.header_params.end()) {
-                try {
-                    body_remaining_ = std::stoul(it->second);
-                    if (body_remaining_ > kMaxBodyLen) {
-                        return false;
-                    }
-
-                    req.body.reserve(body_remaining_);
-                    state =
-                        (body_remaining_ > 0) ? State::kBody : State::kComplete;
-                } catch (...) {
-                    return false; // 非法数字
-                }
-            } else {
+        case State::kBody: {
+            const size_t take = std::min(n - i, body_remaining_);
+            req.body.append(chunk.substr(i, take));
+            body_remaining_ -= take;
+            i += take;
+            if (body_remaining_ == 0) {
                 state = State::kComplete;
             }
-        } else {
-            return false;
+            break;
         }
-        break;
 
-    case State::kBody:
-        req.body += c;
-        if (--body_remaining_ == 0) {
-            state = State::kComplete;
+        case State::kComplete:
+        case State::kError:
+            // 报文已结束：剩下的字节属于下一个请求，交给调用方处置
+            return i;
         }
-        break;
-
-    default:
-        return false;
     }
 
-    return true;
+    return i;
 }
 } // namespace details
 } // namespace http

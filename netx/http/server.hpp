@@ -166,8 +166,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
                     Response res = std::move(res_exp.value());
                     if (res.status_code == 101) {
-                        std::string client_key =
-                            req.header("sec-websocket-key");
+                        std::string client_key{req.header("sec-websocket-key")};
                         std::string accept_key = websocket::details::
                             WSHandshake::generate_accept_key(client_key);
 

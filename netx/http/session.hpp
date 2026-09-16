@@ -34,31 +34,13 @@ struct Session {
 };
 
 inline bool Session::parse(net::details::Buffer &buf) {
-    while (buf.readable_bytes() > 0) {
-        if (parser_.state == Parser::State::kBody) {
-            size_t n = std::min(buf.readable_bytes(), parser_.body_remaining());
-            parser_.append_body(buf.peek(), n);
-
-            buf.retrieve(n);
-
-            if (parser_.body_remaining() == 0) {
-                parser_.state = Parser::State::kComplete;
-                return true;
-            }
-            continue;
-        }
-
-        char c = *buf.peek();
-        if (!parser_.consume(c)) {
-            return false;
-        }
-
-        buf.retrieve(1);
-
-        if (parser_.completed()) {
-            return true;
-        }
+    const auto consumed = parser_.feed(buf.peek_string());
+    if (!consumed) {
+        return false;
     }
+
+    // feed 只吃掉属于当前报文的字节；流水线里剩下的留给下一次调用
+    buf.retrieve(*consumed);
     return true;
 }
 } // namespace details

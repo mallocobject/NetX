@@ -24,7 +24,9 @@ add_executable(netx_test
     stream.cpp
     scheduler.cpp
     server.cpp
-    http.cpp)
+    http.cpp
+    compile_all.cpp
+    websocket.cpp)
 
 target_link_libraries(netx_test PRIVATE netx elog Catch2::Catch2WithMain)
 

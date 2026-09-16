@@ -21,10 +21,10 @@ struct Router {
         requires std::invocable<Handler, Request &> &&
                  std::same_as<std::invoke_result_t<Handler, Request &>,
                               core::Task<core::Expected<Response>>>
-    void route(const std::string &method,
-               const std::string &path,
-               Handler &&handler) {
-        trees_[method].insert(path, std::forward<Handler>(handler));
+    [[nodiscard]] bool route(const std::string &method,
+                             const std::string &path,
+                             Handler &&handler) {
+        return trees_[method].insert(path, std::forward<Handler>(handler));
     }
 
     template <typename Handler>
@@ -33,18 +33,21 @@ struct Router {
                      std::invoke_result_t<Handler,
                                           websocket::details::Connection &>,
                      core::Task<core::Expected<>>>
-    void route(const std::string &path, Handler &&handler) {
-        route("GET",
-              path,
-              [](Request &req) -> core::Task<core::Expected<Response>> {
-                  Response res;
-                  if (req.header("upgrade") == "websocket") {
-                      res.with_status(101);
-                  }
-                  co_return res;
-              });
+    [[nodiscard]] bool route(const std::string &path, Handler &&handler) {
+        // 升级请求先由 HTTP 侧接住：它要回 101 和握手头，真正的 WS 处理
+        // 在 http::Server 里等握手发完之后再接管
+        const bool ok =
+            route("GET",
+                  path,
+                  [](Request &req) -> core::Task<core::Expected<Response>> {
+                      Response res;
+                      if (req.header("upgrade") == "websocket") {
+                          res.with_status(101);
+                      }
+                      co_return res;
+                  });
 
-        ws_tree_.insert(path, std::move(handler));
+        return ok && ws_tree_.insert(path, std::move(handler));
     }
 
     WsHandler get_ws_handler(const std::string &path) {
@@ -59,26 +62,18 @@ struct Router {
     ~Router() = default;
 
   private:
-    static std::string get_mine_type(const std::string &path);
-
-  private:
     std::unordered_map<std::string, RadixTree<HttpHandler>> trees_;
     RadixTree<WsHandler> ws_tree_;
 };
 
 inline core::Task<core::Expected<Response>> Router::dispatch(Request &req) {
-    std::string clean_path =
-        RadixTree<HttpHandler>::normalize_path(req.url_path);
-    req.url_path = clean_path;
+    // 就地归一化。原实现先拷出一个新字符串、再在内部建容器拆段，
+    // 一次派发白白多做两三次分配。
+    RadixTree<HttpHandler>::normalize_in_place(req.url_path);
 
     if (auto it = trees_.find(req.method); it != trees_.end()) {
-        HttpHandler handler;
-
-        if (auto match = it->second.search(clean_path);
-            match.value) // match.value 是指向 HttpHandler 的指针
-        {
+        if (auto match = it->second.search(req.url_path); match.value) {
             req.path_params = std::move(match.params);
-
             co_return co_await (*match.value)(req);
         }
     }

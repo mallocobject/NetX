@@ -7,10 +7,13 @@
 #include "netx/net/address.hpp"
 #include "netx/net/buffer.hpp"
 #include "netx/net/socket.hpp"
+#include <array>
 #include <cerrno>
 #include <cstddef>
+#include <span>
 #include <string_view>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include <utility>
 
@@ -38,6 +41,9 @@ class Stream {
     Buffer write_buf{};
 
   private:
+    /// 把 write_buf 里的积压全部写出，必要时等可写
+    core::Task<core::Expected<>> flush();
+
     explicit Stream(int fd1, int fd2)
         : read_awaiter_(core::details::EventLoop::loop().wait_event(
               {.fd = fd1, .flags = core::details::Event::kEventRead})),
@@ -106,6 +112,15 @@ class Stream {
     /// 从 fd 读一批数据进 read_buf，返回本次读到的字节数。
     /// 数据留在 read_buf 里由调用方取用；对端关闭以 BrokenPipe 返回。
     core::Task<core::Expected<size_t>> read();
+
+    /// 依次写出多段数据，顺序即参数顺序。
+    ///
+    /// 缓冲为空时用 writev 一次陷入内核把多段全发出去，既不拷贝也少一次
+    /// 系统调用 —— 原来一个响应要 write(head) + write(body) 两次。
+    /// 缓冲非空、或第一次没发完时，剩余部分按顺序追加进缓冲统一 flush，
+    /// 保证字节顺序。
+    core::Task<core::Expected<>>
+    write_many(std::span<const std::string_view> parts);
 
     /// 把 data 写出去。内部缓冲还有积压时会把 data 追加进去一起排，
     /// 以保证写出顺序；返回时缓冲已排空（除非出错）。
@@ -189,6 +204,11 @@ inline core::Task<core::Expected<>> Stream::write(std::string_view data) {
         write_buf.append(data);
     }
 
+    co_await flush();
+    co_return {};
+}
+
+inline core::Task<core::Expected<>> Stream::flush() {
     while (write_buf.readable_bytes() > 0) {
         const ssize_t n =
             ::write(write_fd, write_buf.peek(), write_buf.readable_bytes());
@@ -211,6 +231,63 @@ inline core::Task<core::Expected<>> Stream::write(std::string_view data) {
         co_return core::details::from_errno_to_unexpected(errno);
     }
 
+    co_return {};
+}
+
+inline core::Task<core::Expected<>>
+Stream::write_many(std::span<const std::string_view> parts) {
+    constexpr size_t kMaxIov = 8;
+
+    if (write_buf.readable_bytes() == 0 && parts.size() <= kMaxIov) {
+        std::array<iovec, kMaxIov> iov{};
+        size_t cnt = 0;
+        for (const auto part : parts) {
+            if (part.empty()) {
+                continue;
+            }
+            iov[cnt].iov_base = const_cast<char *>(part.data());
+            iov[cnt].iov_len = part.size();
+            ++cnt;
+        }
+
+        // 记下已经发出去的字节数，用它把剩余部分折进缓冲
+        size_t done = 0;
+        if (cnt > 0) {
+            const ssize_t n =
+                ::writev(write_fd, iov.data(), static_cast<int>(cnt));
+            if (n > 0) {
+                done = static_cast<size_t>(n);
+            } else if (n == 0) [[unlikely]] {
+                co_return core::details::make_error_to_unexpected(
+                    core::details::Error::BrokenPipe);
+            } else if (errno != EINTR && errno != EWOULDBLOCK &&
+                       errno != EAGAIN) {
+                co_return core::details::from_errno_to_unexpected(errno);
+            }
+            // EINTR / EAGAIN：done 保持 0，全部折进缓冲由 flush 重试
+        }
+
+        size_t skip = done;
+        for (const auto part : parts) {
+            if (skip >= part.size()) {
+                skip -= part.size();
+                continue;
+            }
+            write_buf.append(part.substr(skip));
+            skip = 0;
+        }
+
+        // 常见情况：一次 writev 全发完，到这里缓冲仍是空的
+        if (write_buf.readable_bytes() == 0) {
+            co_return {};
+        }
+    } else {
+        for (const auto part : parts) {
+            write_buf.append(part);
+        }
+    }
+
+    co_await flush();
     co_return {};
 }
 

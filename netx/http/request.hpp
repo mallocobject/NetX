@@ -1,24 +1,25 @@
 #pragma once
 
+#include "netx/http/field_map.hpp"
 #include <string>
-#include <unordered_map>
+#include <string_view>
+
 namespace netx {
 namespace http {
+
 struct Request {
-
-    std::string header(const std::string &key) const {
-        auto it = header_params.find(key);
-        return (it != header_params.end()) ? it->second : "";
+    /// header 名由解析器统一转小写后存入，这里按原文查即可。
+    /// 返回 string_view 而不是 string —— 原来每次取值都白拷一份。
+    [[nodiscard]] std::string_view header(std::string_view key) const {
+        return header_params.get(key);
     }
 
-    std::string query(const std::string &key) const {
-        auto it = query_params.find(key);
-        return (it != query_params.end()) ? it->second : "";
+    [[nodiscard]] std::string_view query(std::string_view key) const {
+        return query_params.get(key);
     }
 
-    std::string path(const std::string &key) const {
-        auto it = path_params.find(key);
-        return (it != path_params.end()) ? it->second : "";
+    [[nodiscard]] std::string_view path(std::string_view key) const {
+        return path_params.get(key);
     }
 
     void clear() {
@@ -41,9 +42,9 @@ struct Request {
     std::string url_path;
     std::string version;
 
-    std::unordered_map<std::string, std::string> header_params;
-    std::unordered_map<std::string, std::string> query_params;
-    std::unordered_map<std::string, std::string> path_params;
+    FieldMap header_params;
+    FieldMap query_params;
+    FieldMap path_params;
 
     std::string body;
     bool keep_alive{false};
