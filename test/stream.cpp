@@ -202,12 +202,26 @@ TEST_CASE("read 在没有数据时会挂起等可读事件", "[net][stream]") {
     REQUIRE(stream.has_value());
     pair.release_a();
 
+    ssize_t g_wrote = -1;
+
     // 调用 read 时对端还没写 —— 第一次必然 EAGAIN，走到 co_await 可读事件
     // 那条路；数据稍后才到
     std::thread writer([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(30));
         const std::string msg = "late";
-        (void)::write(pair.b, msg.data(), msg.size());
+        // Release 下 _FORTIFY_SOURCE 给 write 加了 warn_unused_result，
+        // (void) 压不住；这里本来就该确认整条都写出去了
+        ssize_t wrote = 0;
+        while (wrote < static_cast<ssize_t>(msg.size())) {
+            const ssize_t n = ::write(pair.b,
+                                      msg.data() + wrote,
+                                      msg.size() - static_cast<size_t>(wrote));
+            if (n <= 0) {
+                break;
+            }
+            wrote += n;
+        }
+        g_wrote = wrote;
     });
 
     size_t got = 0;
@@ -222,6 +236,8 @@ TEST_CASE("read 在没有数据时会挂起等可读事件", "[net][stream]") {
 
     const auto result = async_main(body());
     writer.join();
+
+    REQUIRE(g_wrote == 4); // 对端那 4 字节确实发出去了
 
     REQUIRE(result.has_value());
     CHECK(got == 4);

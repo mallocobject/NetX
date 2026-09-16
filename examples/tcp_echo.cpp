@@ -8,9 +8,9 @@
 #include "elog/logger.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
+#include "netx/net/server.hpp"
 #include "netx/net/socket.hpp"
 #include "netx/net/stream.hpp"
-#include "netx/net/server.hpp"
 
 #include <stdexcept>
 #include <string>
@@ -50,7 +50,7 @@ struct TcpEchoServer : net::Server {
     }
 
     netx::core::Task<netx::core::Expected<>> handle_client(int read_fd,
-                                                        int write_fd) {
+                                                           int write_fd) {
         auto stream = net::Stream::create(read_fd, write_fd);
         if (!stream) {
             (void)net::Socket::close(read_fd);

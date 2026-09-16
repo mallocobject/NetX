@@ -94,6 +94,12 @@ class Server {
         return !self.slots_ || self.slots_->try_acquire();
     }
 
+    /// 是否配置了连接空闲超时。
+    /// timeout_ 的默认值就是"不超时"那个哨兵，所以两者相等即表示没设。
+    [[nodiscard]] bool has_timeout() const noexcept {
+        return timeout_ < kNoTimeout;
+    }
+
     /// 连接关闭时由派生类调用，归还一个名额。
     /// 可以跨线程调用 —— counting_semaphore::release() 本身就是原子的，
     /// 所以这里不需要额外的唤醒通道。

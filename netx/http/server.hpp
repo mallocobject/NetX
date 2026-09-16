@@ -124,15 +124,29 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
     try {
         while (true) {
-            auto var =
-                (co_await core::when_any(s.read(), core::sleep(timeout_)))
-                    .value();
+            core::Expected<size_t> read_exp;
+            bool idle_timeout = false;
 
-            if (var.index() == 1) {
+            if (has_timeout()) {
+                auto raced =
+                    co_await core::when_any(s.read(), core::sleep(timeout_));
+                if (!raced) {
+                    co_return std::unexpected{raced.error()};
+                }
+                if (raced->index() == 1) {
+                    idle_timeout = true;
+                } else {
+                    read_exp = std::move(std::get<0>(*raced));
+                }
+            } else {
+                // 没配超时就不必把 sleep 拉进来赛跑。默认那个"不超时"的哨兵
+                // 每读一次都要挂一个一年期的定时器、读完再取消掉，纯属白做。
+                read_exp = co_await s.read();
+            }
+
+            if (idle_timeout) {
                 elog::LOG_DEBUG("Connection idle timeout, closing fd {}",
                                 s.read_fd);
-                // co_await s.write("HTTP/1.1 408 Request Timeout\r\nConnection:
-                // " 				 "close\r\n\r\n");
                 co_await s.write(Response{}
                                      .with_status(408)
                                      .keep_alive(false)
@@ -140,7 +154,6 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                 break;
             }
 
-            auto &read_exp = std::get<0>(var);
             if (!read_exp) {
                 if (read_exp.error() != core::details::Error::BrokenPipe) {
                     elog::LOG_DEBUG("Client read error: {}",

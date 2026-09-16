@@ -108,6 +108,7 @@ Core coroutine primitives: `Task<T>`, `Expected<T>`, `sleep`, `when_any`,
 
 ```bash
 ./examples/build/netx_http        # http://127.0.0.1:8080/
+./examples/build/netx_http 1000   # same, but at most 1000 concurrent clients
 ./examples/build/netx_ws          # http://127.0.0.1:8081/
 ./examples/build/netx_tcp_echo    # echo | nc 127.0.0.1 8082
 ```

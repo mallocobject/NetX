@@ -68,6 +68,15 @@ class TestServer : public Server {
         return max_connections_;
     }
 
+    // has_timeout() 是基类的 protected 成员
+    bool timeout_is_set() const {
+        return has_timeout();
+    }
+
+    std::chrono::nanoseconds timeout_value() const {
+        return timeout_;
+    }
+
     // 把受保护的容量门控露出来给用例断言
     bool try_slot() {
         return try_acquire_slot();
@@ -198,6 +207,19 @@ TEST_CASE("max_connections 可以设置并参与链式调用", "[net][server]") 
     CHECK(server.connection_cap() == 100);
     CHECK(server.configured_loops() == 2);
     CHECK_FALSE(server.sticky());
+}
+
+TEST_CASE("默认不设超时，设了才算设", "[net][server]") {
+    auto stream = make_listen_stream();
+    REQUIRE(stream.has_value());
+    TestServer server{std::move(*stream), -1, -1};
+
+    // 默认值是"不超时"的哨兵，HTTP 层靠它决定要不要挂定时器赛跑
+    CHECK_FALSE(server.timeout_is_set());
+
+    server.timeout(std::chrono::seconds(3));
+    CHECK(server.timeout_is_set());
+    CHECK(server.timeout_value() == std::chrono::seconds(3));
 }
 
 TEST_CASE("默认不设上限", "[net][server]") {

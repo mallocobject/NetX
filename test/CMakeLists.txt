@@ -26,7 +26,8 @@ add_executable(netx_test
     server.cpp
     http.cpp
     compile_all.cpp
-    websocket.cpp)
+    websocket.cpp
+    sender.cpp)
 
 target_link_libraries(netx_test PRIVATE netx elog Catch2::Catch2WithMain)
 

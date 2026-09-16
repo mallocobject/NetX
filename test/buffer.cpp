@@ -38,6 +38,12 @@ namespace {
 std::atomic<std::size_t> g_alloc_count{0};
 }
 
+// -Wmismatched-new-delete 在这里是误报：这一对是成套的（new 用 malloc、
+// delete 用 free），只是 GCC 看不穿被替换掉的全局 operator new。
+// 只在计数这几个函数上关掉，别的影响面太大。
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+
 void *operator new(std::size_t n) {
     g_alloc_count.fetch_add(1, std::memory_order_relaxed);
     if (void *p = std::malloc(n)) {
@@ -65,6 +71,8 @@ void operator delete(void *p, std::size_t) noexcept {
 void operator delete[](void *p, std::size_t) noexcept {
     std::free(p);
 }
+
+#pragma GCC diagnostic pop
 
 namespace {
 
