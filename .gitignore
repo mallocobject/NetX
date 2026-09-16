@@ -4,5 +4,4 @@ build/
 .agent/
 logs/
 *.log
-examples/build/
 build-release/

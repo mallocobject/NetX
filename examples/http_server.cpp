@@ -21,15 +21,10 @@ using netx::http::Request;
 using netx::http::Response;
 using netx::http::Server;
 
-int main(int argc, char **argv) {
-    // 0 表示不限。上限一旦设了，超出部分的连接会被接进来立刻关掉 ——
-    // 对端马上拿到 RST，比让它在内核 backlog 里干等更早得到反馈。
-    const size_t max_conns =
-        (argc > 1) ? std::strtoul(argv[1], nullptr, 10) : 0;
+using namespace std::chrono_literals;
 
-    auto &server = Server::server();
-
-    server
+int main() {
+    Server::server()
         .listen("0.0.0.0", 8080)
         // 首页
         .route("GET",
@@ -78,15 +73,14 @@ int main(int argc, char **argv) {
         //
         // 路径到达这里之前已经被归一化过（"." / ".." / 重复斜杠都折掉了），
         // 所以拼接不会跳出 NETX_WEB_SRC_DIR；文件不存在时 Sender 回 404。
-        .route("GET", "/*", [](Request &req) -> Task<Expected<Response>> {
-            co_return Response{}.with_status(200).with_file(
-                std::string{NETX_WEB_SRC_DIR} + req.url_path);
-        });
-
-    // 必须在 start() 之前调用：并发名额是在配置时建好的
-    if (max_conns > 0) {
-        server.max_connections(max_conns);
-    }
-
-    server.timeout(std::chrono::seconds(30)).loop(4).start();
+        .route("GET",
+               "/*",
+               [](Request &req) -> Task<Expected<Response>> {
+                   co_return Response{}.with_status(200).with_file(
+                       std::string{NETX_WEB_SRC_DIR} + req.url_path);
+               })
+        .max_connections(0)
+        .timeout(60s)
+        .loop(8)
+        .start();
 }

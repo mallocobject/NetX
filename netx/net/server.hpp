@@ -126,16 +126,15 @@ class Server {
         }
     }
 
-    /// 同时可服务的客户端连接数上限。不设则不限。
+    /// 同时可服务的客户端连接数上限。置零的不限
     auto &max_connections(this auto &self, size_t n) {
         if (self.sticky_error_) {
             return self;
         }
 
+        // 0 表示不限：保持默认哨兵值、不建信号量，accept 路径上也就没有
+        // 任何额外开销
         if (n == 0) {
-            self.sticky_error_ = core::details::make_error_code(
-                core::details::Error::InvalidOperation);
-            elog::LOG_ERROR("max_connections must be >= 1, got 0");
             return self;
         }
 

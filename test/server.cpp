@@ -266,18 +266,32 @@ TEST_CASE("不设上限时永远接纳，归还也是空操作", "[net][server]"
     CHECK_NOTHROW(server.close_connection());
 }
 
-TEST_CASE("max_connections(0) 记进 sticky_error_", "[net][server]") {
+TEST_CASE("max_connections(0) 表示不限", "[net][server]") {
     auto stream = make_listen_stream();
     REQUIRE(stream.has_value());
     TestServer server{std::move(*stream), -1, -1};
 
     server.max_connections(0);
-    CHECK(server.sticky() == make_error_code(Error::InvalidOperation));
+
+    // 0 不是错误，是"不限"：保持哨兵值，也不建信号量
+    CHECK_FALSE(server.sticky());
     CHECK(server.connection_cap() == std::numeric_limits<size_t>::max());
 
-    // 挂了错误之后不再被后面的配置覆盖
-    server.max_connections(8);
-    CHECK(server.connection_cap() == std::numeric_limits<size_t>::max());
+    // 门控恒为真 —— 不限时连取一万次都该成功
+    bool all = true;
+    for (int i = 0; i < 10000; ++i) {
+        all = all && server.try_slot();
+    }
+    CHECK(all);
+
+    // 先设了上限再传 0：0 只是不动它，不会把已有上限抹掉
+    auto stream2 = make_listen_stream();
+    REQUIRE(stream2.has_value());
+    TestServer limited{std::move(*stream2), -1, -1};
+    limited.max_connections(2);
+    CHECK(limited.connection_cap() == 2);
+    limited.max_connections(0);
+    CHECK(limited.connection_cap() == 2);
 }
 
 TEST_CASE("非法 IP 折进 sticky_error_ 而不是抛异常", "[net][server]") {
