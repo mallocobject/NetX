@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
+#include <functional>
 #include <latch>
 #include <limits>
 #include <memory>
@@ -100,6 +101,8 @@ class Server {
         return timeout_ < kNoTimeout;
     }
 
+    std::function<void(int fd, const Address &peer)> on_accept_;
+
     /// 连接关闭时由派生类调用，归还一个名额。
     /// 可以跨线程调用 —— counting_semaphore::release() 本身就是原子的，
     /// 所以这里不需要额外的唤醒通道。
@@ -124,6 +127,16 @@ class Server {
                 fd = -1;
             }
         }
+    }
+
+    /// 注册"新连接"回调。不设就不回调。
+    ///
+    /// 给应用层留的挂钩：库内部那条 accepted 是 DEBUG 级的，终端默认门限
+    /// 看不见，而"新连接该记到哪一级、要不要落盘"不该由库替应用决定。
+    auto &on_accept(this auto &self,
+                    std::function<void(int, const Address &)> cb) {
+        self.on_accept_ = std::move(cb);
+        return self;
     }
 
     /// 同时可服务的客户端连接数上限。置零的不限
@@ -167,7 +180,7 @@ class Server {
 
         if (!result) {
             self.sticky_error_ = result.error();
-            elog::LOG_ERROR("Listen failed at {}: {}, {}",
+            elog::LOG_FATAL("Listen failed at {}: {}, {}",
                             sock_addr.to_formatted_string(),
                             self.sticky_error_.value(),
                             self.sticky_error_.message());
@@ -191,7 +204,7 @@ class Server {
             return self.listen(Address{ip, port});
         } catch (const std::system_error &e) {
             self.sticky_error_ = e.code();
-            elog::LOG_ERROR("Listen failed at {}:{}: {}",
+            elog::LOG_FATAL("Listen failed at {}:{}: {}",
                             ip,
                             port,
                             self.sticky_error_.message());
@@ -223,7 +236,7 @@ class Server {
         if (loop_count < 1) {
             self.sticky_error_ = core::details::make_error_code(
                 core::details::Error::InvalidOperation);
-            elog::LOG_ERROR("loop count must be >= 1, got {}", loop_count);
+            elog::LOG_FATAL("loop count must be >= 1, got {}", loop_count);
             return self;
         }
 
@@ -236,7 +249,7 @@ class Server {
 
 inline void Server::start(this auto &self) {
     if (self.sticky_error_) {
-        elog::LOG_ERROR("Server cannot start due to previous errors: {}",
+        elog::LOG_FATAL("Server cannot start due to previous errors: {}",
                         self.sticky_error_.message());
         return;
     }
@@ -300,7 +313,7 @@ core::Task<core::Expected<>> Server::server_loop(this Self &self) {
 
     while (true) {
         if (auto exp = co_await ev_awaiter; !exp) {
-            elog::LOG_ERROR("Server: waiting on the listen fd failed: {}",
+            elog::LOG_FATAL("Server: waiting on the listen fd failed: {}",
                             exp.error().message());
             co_return std::unexpected{exp.error()};
         }
@@ -351,13 +364,13 @@ core::Task<core::Expected<>> Server::server_loop(this Self &self) {
                     // listen socket 已经不可用（被关掉/类型不对）。epoll 会
                     // 一直报可读，再转下去就是满速空转刷日志 —— 收掉整个
                     // 循环，把错误交给 start() 的调用方
-                    elog::LOG_ERROR("Server: fatal accept error: {}",
+                    elog::LOG_FATAL("Server: fatal accept error: {}",
                                     exp.error().message());
                     co_return std::unexpected{exp.error()};
 
                 default:
-                    elog::LOG_ERROR("Server: accept failed: {}",
-                                    exp.error().message());
+                    elog::LOG_WARN("Server: accept failed: {}",
+                                   exp.error().message());
                     break;
                 }
                 break; // 回到外层，等下一次可读事件
@@ -383,7 +396,7 @@ core::Task<core::Expected<>> Server::server_loop(this Self &self) {
                 if (self.slots_) {
                     self.slots_->release(); // 名额还回去
                 }
-                elog::LOG_ERROR(
+                elog::LOG_WARN(
                     "Server: dup failed for fd={}: {}", conn_fd, ec.message());
                 continue;
             }
@@ -409,6 +422,10 @@ core::Task<core::Expected<>> Server::server_loop(this Self &self) {
             elog::LOG_DEBUG("Server: accepted fd={} addr={}",
                             conn_fd,
                             addr.to_formatted_string());
+
+            if (self.on_accept_) {
+                self.on_accept_(conn_fd, addr);
+            }
 
             lucky->push(self.handle_client(conn_fd, dup_conn_fd));
             (void)lucky->wakeup();

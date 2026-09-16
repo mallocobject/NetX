@@ -4,6 +4,7 @@
 //
 // 静态文件从 examples/public 取，路径由 NETX_WEB_SRC_DIR 在编译期传入。
 
+#include "elog/logger.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
 #include "netx/http/request.hpp"
@@ -20,6 +21,8 @@ using netx::core::Task;
 using netx::http::Request;
 using netx::http::Response;
 using netx::http::Server;
+
+namespace net = netx::net::details;
 
 using namespace std::chrono_literals;
 
@@ -86,6 +89,15 @@ int main(int argc, char **argv) {
                        std::string{NETX_WEB_SRC_DIR} + req.url_path);
                })
         .max_connections(max_conns)
+        // 应用层自己的日志。库内部那条 accepted 是 DEBUG 级的，终端默认
+        // 门限（INFO）下看不见；这里用 INFO，默认就能看到，也可以换成
+        // DEBUG/TRACE 让它只进文件。
+        //
+        // 落盘不用写代码：设了 ELOG_PATH 环境变量就会同时写文件。
+        .on_accept([](int fd, const net::Address &peer) {
+            elog::LOG_INFO(
+                "new connection fd={} from {}", fd, peer.to_formatted_string());
+        })
         .timeout(60s)
         .loop(8)
         .start();

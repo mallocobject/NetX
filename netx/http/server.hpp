@@ -46,7 +46,7 @@ class Server : public net::details::Server {
             sticky_error_ = core::details::make_error_to_unexpected(
                                 core::details::Error::InvalidOperation)
                                 .error();
-            elog::LOG_ERROR("route {} {}: parameter name conflicts with an "
+            elog::LOG_FATAL("route {} {}: parameter name conflicts with an "
                             "existing route",
                             method,
                             path);
@@ -65,7 +65,7 @@ class Server : public net::details::Server {
             sticky_error_ = core::details::make_error_to_unexpected(
                                 core::details::Error::InvalidOperation)
                                 .error();
-            elog::LOG_ERROR("route {}: parameter name conflicts with an "
+            elog::LOG_FATAL("route {}: parameter name conflicts with an "
                             "existing route",
                             path);
         }
@@ -120,7 +120,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
     auto stream_exp = net::details::Stream::create(read_fd, write_fd);
     if (!stream_exp) {
-        elog::LOG_DEBUG("connection setup failed fd={}", read_fd);
+        elog::LOG_WARN("connection setup failed fd={}", read_fd);
         ::close(read_fd);
         ::close(write_fd);
         co_return {};
@@ -221,8 +221,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
                         if (auto exp = co_await details::Sender::send(s, res);
                             !exp) {
-                            const std::error_code &ec = exp.error();
-                            elog::LOG_ERROR("{}, {}", ec.value(), ec.message());
+                            elog::LOG_DEBUG("send failed: {}",
+                                            exp.error().message());
                             break;
                         }
 
@@ -232,8 +232,8 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                             // 进入长连接处理循环；它的结果原来被直接丢掉了
                             const auto ws_res = co_await ws_handler(ws_conn);
                             if (!ws_res) {
-                                elog::LOG_DEBUG("websocket handler error: {}",
-                                                ws_res.error().message());
+                                elog::LOG_WARN("websocket handler error: {}",
+                                               ws_res.error().message());
                             }
                         }
                         co_return {};
