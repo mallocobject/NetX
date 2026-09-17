@@ -24,35 +24,22 @@ namespace netx::net::details {
 // 同一个 socket；create(fd1, fd2) 则用调用方给的两个 fd，此时两者可能相同，
 // close()/shutdown() 必须避免对同一个 fd 操作两次。
 class Stream {
-  private:
-    // 这两个必须声明在最前面：C++ 按声明顺序初始化成员，而下面的构造
-    // 函数要用 fd 参数喂给它们。若把它们放到 read_fd/write_fd 之后，初始化
-    // 时读到的就是尚未初始化的 fd。
-    core::details::EventLoop::EventAwaiter read_awaiter_;
-    core::details::EventLoop::EventAwaiter write_awaiter_;
-
   public:
-    int read_fd{-1};
-    int write_fd{-1};
-
-    Address sock_addr{};
-
-    Buffer read_buf{};
-    Buffer write_buf{};
-
-  private:
-    /// 把 write_buf 里的积压全部写出，必要时等可写
-    core::Task<core::Expected<>> flush();
-
-    explicit Stream(int fd1, int fd2)
-        : read_awaiter_(core::details::EventLoop::loop().wait_event(
-              {.fd = fd1, .flags = core::details::Event::kEventRead})),
-          write_awaiter_(core::details::EventLoop::loop().wait_event(
-              {.fd = fd2, .flags = core::details::Event::kEventWrite})),
-          read_fd(fd1), write_fd(fd2) {
+    Stream(Stream &&other) noexcept
+        : read_fd(std::exchange(other.read_fd, -1)),
+          write_fd(std::exchange(other.write_fd, -1)),
+          sock_addr(other.sock_addr), read_buf(std::move(other.read_buf)),
+          write_buf(std::move(other.write_buf)),
+          read_awaiter_(std::move(other.read_awaiter_)),
+          write_awaiter_(std::move(other.write_awaiter_)) {
     }
 
-  public:
+    Stream &operator=(Stream &&) = delete;
+
+    ~Stream() {
+        (void)close();
+    }
+
     /// 接管 fd：置为非阻塞，并 ::dup 一份作为写端（两者是同一个 socket）
     static core::Expected<Stream> create(int fd) {
         if (auto exp = Socket::set_non_blocking(fd); !exp) {
@@ -69,9 +56,7 @@ class Stream {
 
     /// 用给定的两个 fd 建流。注意 fd1 与 fd2 可能是同一个 fd。
     static core::Expected<Stream> create(int fd1, int fd2) {
-        // 两步都是 Expected<>、错误处理完全一致：串成一条链，短路由结构
-        // 保证，错误路径只写一次；最后一步只是把两个 fd 组装成 Stream，
-        // 不会再失败，用 transform 收尾
+        // https://cppreference.cn/w/cpp/utility/expected
         return Socket::set_non_blocking(fd1)
             .and_then([fd2] { return Socket::set_non_blocking(fd2); })
             .transform([fd1, fd2] { return Stream{fd1, fd2}; });
@@ -94,7 +79,8 @@ class Stream {
         if (rfd >= 0) {
             result = Socket::close(rfd);
         }
-        // 同一个 fd 不能关两次：第二次关掉的可能是已经被复用的新 fd
+
+        // 相同的 fd 不能关两次，防止复活
         if (wfd >= 0 && wfd != rfd) {
             if (auto exp = Socket::close(wfd); !exp && result) {
                 result = exp;
@@ -103,8 +89,7 @@ class Stream {
         return result;
     }
 
-    /// 半关闭写端。先把 write_buf 里的积压排空再 shutdown —— 同步版本没法等
-    /// 可写事件，只能把没发出去的数据丢掉，所以这里做成协程。
+    /// 半关闭写端。先把 write_buf 里的积压排空再 shutdown
     ///
     /// 可重复调用；写端已关时是空操作。
     core::Task<core::Expected<>> shutdown();
@@ -126,43 +111,41 @@ class Stream {
     core::Task<core::Expected<>> write(std::string_view data = "");
 
     /// 记录本端地址（由外部构造后传入）。
-    ///
-    /// 只做记录，不发起 ::bind —— 绑定是高层动作，由连接层在合适的时机决定。
     void set_local_addr(const Address &addr) {
         sock_addr = addr;
     }
 
-    // 初始化列表按声明顺序写，避免"看着先初始化 read_fd、实际先初始化
-    // awaiter"这种误读
-    Stream(Stream &&other) noexcept
-        : read_awaiter_(std::move(other.read_awaiter_)),
-          write_awaiter_(std::move(other.write_awaiter_)),
-          read_fd(std::exchange(other.read_fd, -1)),
-          write_fd(std::exchange(other.write_fd, -1)),
-          sock_addr(other.sock_addr), read_buf(std::move(other.read_buf)),
-          write_buf(std::move(other.write_buf)) {
+  public:
+    int read_fd{-1};
+    int write_fd{-1};
+
+    Address sock_addr{};
+
+    Buffer read_buf{};
+    Buffer write_buf{};
+
+  private:
+    explicit Stream(int fd1, int fd2)
+        : read_fd(fd1), write_fd(fd2),
+          read_awaiter_(core::details::EventLoop::loop().wait_event(
+              {.fd = fd1, .flags = core::details::Event::kEventRead})),
+          write_awaiter_(core::details::EventLoop::loop().wait_event(
+              {.fd = fd2, .flags = core::details::Event::kEventWrite})) {
     }
 
-    Stream(const Stream &) = delete;
-    Stream &operator=(const Stream &) = delete;
-    Stream &operator=(Stream &&) = delete;
+    /// 把 write_buf 里的积压全部写出，必要时等可写
+    core::Task<core::Expected<>> flush();
 
-    ~Stream() {
-        (void)close();
-    }
+    core::details::EventLoop::EventAwaiter read_awaiter_;
+    core::details::EventLoop::EventAwaiter write_awaiter_;
 };
 
 inline core::Task<core::Expected<size_t>> Stream::read() {
     while (true) {
-        // co_await 一个 Expected：有值就取到值，出错则把 unexpected 写进本
-        // 任务的结果并冻结在这个挂起点 —— 不必手写 co_return std::unexpected。
-        // 对端关闭也走这条路（Buffer::read_fd 把 EOF 报成 BrokenPipe）。
         const size_t n = co_await read_buf.read_fd(read_fd);
 
         if (n == 0) {
             // Buffer::read_fd 用 0 表示 EAGAIN：这一轮没数据，等可读事件再试。
-            // 内层 co_await 等事件并产出 Expected<>，外层作用于它 ——
-            // 等待本身失败同样自动传播
             co_await co_await read_awaiter_;
             continue;
         }
@@ -176,7 +159,6 @@ inline core::Task<core::Expected<>> Stream::write(std::string_view data) {
     size_t remaining = data.size();
 
     // 缓冲里没有积压时才绕过它直写 fd；否则直接写会插到积压数据前面，
-    // 打乱字节顺序
     if (write_buf.readable_bytes() == 0) {
         while (remaining > 0) {
             const ssize_t n = ::write(write_fd, ptr, remaining);
@@ -223,7 +205,7 @@ inline core::Task<core::Expected<>> Stream::flush() {
             continue;
         }
         if (errno == EWOULDBLOCK || errno == EAGAIN) {
-            // 等可写；等待失败由外层 co_await 自动传播成本任务的结果
+            // 等可写
             co_await co_await write_awaiter_;
             continue;
         }
@@ -291,8 +273,6 @@ Stream::write_many(std::span<const std::string_view> parts) {
 }
 
 inline core::Task<core::Expected<>> Stream::shutdown() {
-    // 先把 write_buf 里的积压排空。write("") 只排空缓冲、不追加新数据；
-    // 内层 co_await 拿到 Expected<>，外层作用于它 —— 写失败自动传播
     co_await co_await write("");
 
     co_await write_awaiter_.reset();
@@ -303,8 +283,7 @@ inline core::Task<core::Expected<>> Stream::shutdown() {
     }
 
     auto exp = Socket::shutdown(wfd);
-    // 半关闭失败也要把 fd 收掉；但 wfd 与 read_fd 相同时不能关，
-    // 否则读端也一起没了
+
     if (wfd != read_fd) {
         (void)Socket::close(wfd);
     }

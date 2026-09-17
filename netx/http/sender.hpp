@@ -19,10 +19,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace netx {
-namespace http {
-namespace details {
-
+namespace netx::http::details {
 /// 把 Response 写到流上。
 ///
 /// 普通响应走"head + body 一次 writev"；文件响应走 mmap，映射结果按路径缓存，
@@ -35,8 +32,6 @@ class Sender {
             co_return co_await send_file(stream, res);
         }
 
-        // head 与 body 一次 writev 发出去。分成两次 write 是两次系统调用，
-        // 而 Stream::write 在缓冲为空时是直写 fd 的，不会自动合并。
         const std::string head = res.to_head_string();
         const std::array<std::string_view, 2> parts{head, res.body};
         co_return co_await stream.write_many(parts);
@@ -59,12 +54,6 @@ class Sender {
     }
 
     /// 已映射文件的缓存。
-    ///
-    /// 单例而不是两个函数各写一个 static 局部变量 —— 那样查缓存和写缓存会
-    /// 落在两张不同的表上，等于永远命不中。
-    ///
-    /// 注意这里没有淘汰策略：进程生命周期内每个访问过的文件都会一直被映射
-    /// 住。做成有上限的 LRU 之前，请先确认调用方在意长期驻留的内存。
     struct FileCache {
         std::unordered_map<std::string, MappedFile> map;
         std::shared_mutex mutex;
@@ -178,6 +167,4 @@ class Sender {
         co_return {};
     }
 };
-} // namespace details
-} // namespace http
-} // namespace netx
+} // namespace netx::http::details

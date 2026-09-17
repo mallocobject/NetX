@@ -15,15 +15,11 @@
 #include <cstddef>
 #include <string_view>
 #include <utility>
-namespace netx {
-namespace http {
+
+namespace netx::http {
 class Server : public net::details::Server {
-    // 基类通过 self.handle_client(...) 调用下面那个私有实现，所以要放行。
-    // CRTP 时代是 Server<Server>，现在基类不再是模板。
-    friend class net::details::Server;
-    Server(net::details::Stream &&stream, int idle_fd1, int idle_fd2)
-        : net::details::Server(std::move(stream), idle_fd1, idle_fd2) {
-    }
+    friend class net::details::Server; // 基类通过 self.handle_client(...)
+                                       // 调用下面那个私有实现
 
   public:
     static Server &server() {
@@ -73,9 +69,17 @@ class Server : public net::details::Server {
     }
 
   private:
-    /// 建监听用的 Stream。失败就抛 std::system_error —— 单例工厂没有错误
-    /// 通道，sticky_error_ 也得先有对象才记得到；这里失败等于进程起不来，
-    /// 抛一个带错误码的异常，比 .value() 的 bad_expected_access 清楚。
+    struct SlotGuard {
+        Server &srv;
+        ~SlotGuard() {
+            srv.release_connection();
+        }
+    };
+
+    Server(net::details::Stream &&stream, int idle_fd1, int idle_fd2)
+        : net::details::Server(std::move(stream), idle_fd1, idle_fd2) {
+    }
+
     static net::details::Stream make_listen_stream() {
         auto fd = net::details::Socket::socket();
         if (!fd) {
@@ -91,17 +95,6 @@ class Server : public net::details::Server {
         return std::move(*stream);
     }
 
-    /// 归还并发名额。用 RAII 保证每条退出路径都还 —— 漏还会让名额只减
-    /// 不增，最终拒绝掉所有新连接。
-    /// 注意持有的是 Server& 而不是 net::details::Server&：protected 成员
-    /// 必须经由派生类访问，写成基类引用会被编译期挡下。
-    struct SlotGuard {
-        Server &srv;
-        ~SlotGuard() {
-            srv.release_connection();
-        }
-    };
-
     core::Task<core::Expected<>> handle_client(int read_fd, int write_fd);
 
   private:
@@ -113,8 +106,6 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
     elog::LOG_DEBUG("new connection fd={}", read_fd);
 
-    // 断开时给一条带原因和请求数的总结。"handle_client end fd=N" 那种写法
-    // 看不出是对端正常关闭、空闲超时、还是出错，排查时等于没有。
     std::string_view close_reason = "unknown";
     size_t requests_served = 0;
 
@@ -127,6 +118,7 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
     }
 
     net::details::Stream s = std::move(stream_exp.value());
+
     const SlotGuard guard{*this};
     details::Session session{};
 
@@ -147,8 +139,6 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                     read_exp = std::move(std::get<0>(*raced));
                 }
             } else {
-                // 没配超时就不必把 sleep 拉进来赛跑。默认那个"不超时"的哨兵
-                // 每读一次都要挂一个一年期的定时器、读完再取消掉，纯属白做。
                 read_exp = co_await s.read();
             }
 
@@ -212,12 +202,24 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                     Response res = std::move(res_exp.value());
                     if (res.status_code == 101) {
                         std::string client_key{req.header("sec-websocket-key")};
-                        std::string accept_key = websocket::details::
-                            WSHandshake::generate_accept_key(client_key);
+                        auto accept_key = websocket::details::WSHandshake::
+                            generate_accept_key(client_key);
+
+                        if (!accept_key) {
+                            close_reason = "accept key error";
+                            elog::LOG_ERROR("websocket accept key failed: {}",
+                                            accept_key.error().message());
+                            co_await s.write(Response{}
+                                                 .with_status(500)
+                                                 .keep_alive(false)
+                                                 .to_formatted_string());
+                            should_close = true;
+                            break;
+                        }
 
                         res.with_header("Upgrade", "websocket")
                             .with_header("Connection", "Upgrade")
-                            .with_header("Sec-WebSocket-Accept", accept_key);
+                            .with_header("Sec-WebSocket-Accept", *accept_key);
 
                         if (auto exp = co_await details::Sender::send(s, res);
                             !exp) {
@@ -249,8 +251,6 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
 
                     auto send_res = co_await details::Sender::send(s, res);
                     if (!send_res) {
-                        // 写失败多半是对端先走了（EPIPE），属于常态，DEBUG
-                        // 够用；但它不能无声消失
                         elog::LOG_DEBUG("send failed: {}",
                                         send_res.error().message());
                     }
@@ -286,5 +286,4 @@ inline core::Task<core::Expected<>> Server::handle_client(int read_fd,
                     requests_served);
     co_return {};
 }
-} // namespace http
-} // namespace netx
+} // namespace netx::http

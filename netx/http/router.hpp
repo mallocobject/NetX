@@ -8,9 +8,8 @@
 #include "netx/websocket/connection.hpp"
 #include <concepts>
 #include <type_traits>
-namespace netx {
-namespace http {
-namespace details {
+
+namespace netx::http::details {
 using HttpHandler =
     std::function<core::Task<core::Expected<Response>>(Request &)>;
 using WsHandler = std::function<core::Task<core::Expected<>>(
@@ -67,8 +66,6 @@ struct Router {
 };
 
 inline core::Task<core::Expected<Response>> Router::dispatch(Request &req) {
-    // 就地归一化。原实现先拷出一个新字符串、再在内部建容器拆段，
-    // 一次派发白白多做两三次分配。
     RadixTree<HttpHandler>::normalize_in_place(req.url_path);
 
     if (auto it = trees_.find(req.method); it != trees_.end()) {
@@ -81,6 +78,4 @@ inline core::Task<core::Expected<Response>> Router::dispatch(Request &req) {
     co_return Response{}.with_status(404).with_body("<h1>404 Not Found</h1>");
 }
 
-} // namespace details
-} // namespace http
-} // namespace netx
+} // namespace netx::http::details

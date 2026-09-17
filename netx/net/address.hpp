@@ -1,23 +1,20 @@
 #pragma once
 
 #include "netx/net/endian.hpp"
-
 #include <array>
 #include <bit>
 #include <charconv>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <netinet/in.h>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 #include <system_error>
 #include <utility>
-
-// POSIX 只出现在文件末尾的 sockaddr 桥接处：地址的解析、格式化、字节序
-// 全部由标准库完成。
-#include <netinet/in.h>
-#include <sys/socket.h>
 
 namespace netx::net::details {
 
@@ -161,7 +158,9 @@ class Address {
 //     return ::bind(fd, sa, len);
 // });
 template <typename Fn>
-decltype(auto) with_sockaddr(const Address &addr, Fn &&fn) {
+decltype(auto) with_sockaddr(const Address &addr, Fn &&fn)
+    requires std::invocable<Fn, const struct sockaddr *, socklen_t>
+{
     const sockaddr_in sa = addr.to_sockaddr_in();
     return std::forward<Fn>(fn)(reinterpret_cast<const struct sockaddr *>(&sa),
                                 static_cast<socklen_t>(sizeof(sa)));

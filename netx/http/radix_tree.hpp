@@ -8,16 +8,14 @@
 #include <unordered_map>
 #include <utility>
 
-namespace netx {
-namespace http {
-namespace details {
-
+namespace netx::http::details {
 /// 路由树。
 ///
 /// 两种段：`:name` 捕获一段，`*` 吃掉剩下的所有段（只能出现在末尾）。
 /// 静态段优先于参数段 —— 否则 `/users/me` 会被 `/users/:id` 抢走。
 template <typename T>
-struct RadixTree {
+class RadixTree {
+  private:
     struct MatchResult {
         T *value = nullptr;
         FieldMap params;
@@ -51,6 +49,16 @@ struct RadixTree {
 
         std::unique_ptr<Node> wildcard_node;
     };
+
+  public:
+    /// 路径长度上限，与解析器的 kMaxUrlPathLen 取同一个值
+    inline static constexpr size_t kMaxPathLen = 1024;
+
+    RadixTree() : root_(std::make_unique<Node>()) {
+    }
+
+    RadixTree(RadixTree &&) = default;
+    ~RadixTree() = default;
 
     /// 逐段遍历，不分配 —— insert/search 各自只走一遍，没必要先把段拆进
     /// 一个容器。
@@ -138,11 +146,8 @@ struct RadixTree {
         path.resize(w);
     }
 
-    /// 路径长度上限，与解析器的 kMaxUrlPathLen 取同一个值
-    inline static constexpr size_t kMaxPathLen = 1024;
-
-    [[nodiscard]] static std::string normalize_path(const std::string &path) {
-        std::string out = path;
+    [[nodiscard]] static std::string normalize_path(std::string_view path) {
+        std::string out{path};
         normalize_in_place(out);
         return out;
     }
@@ -150,7 +155,7 @@ struct RadixTree {
     /// 注册一条路由。返回 false 表示同一位置已经有不同名字的参数段
     /// （`/users/:id` 与 `/users/:name` 冲突）—— 一个节点只能有一个名字。
     template <typename V>
-    [[nodiscard]] bool insert(const std::string &path, V &&val) {
+    [[nodiscard]] bool insert(std::string_view path, V &&val) {
         Node *cur = root_.get();
         bool ok = true;
 
@@ -192,7 +197,7 @@ struct RadixTree {
         return true;
     }
 
-    [[nodiscard]] MatchResult search(const std::string &path) const {
+    [[nodiscard]] MatchResult search(std::string_view path) const {
         MatchResult result;
         Node *cur = root_.get();
 
@@ -229,15 +234,7 @@ struct RadixTree {
         return result;
     }
 
-    RadixTree() : root_(std::make_unique<Node>()) {
-    }
-
-    RadixTree(RadixTree &&) = default;
-    ~RadixTree() = default;
-
   private:
     std::unique_ptr<Node> root_;
 };
-} // namespace details
-} // namespace http
-} // namespace netx
+} // namespace netx::http::details

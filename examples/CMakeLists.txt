@@ -29,7 +29,7 @@ include(FetchContent)
 if(NOT TARGET elog)
     FetchContent_Declare(
         elog
-        GIT_REPOSITORY https://github.com/mallocobject/Elog
+        GIT_REPOSITORY https://github.com/mallocobject/Elog.git
         GIT_TAG        main       
         GIT_SHALLOW    TRUE
     )

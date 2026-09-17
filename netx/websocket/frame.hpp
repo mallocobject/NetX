@@ -3,12 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <string_view>
 
-namespace netx {
-namespace websocket {
-namespace details {
-
+namespace netx::websocket::details {
 enum class Opcode : std::uint8_t {
     kContinuation = 0x0,
     kText = 0x1,
@@ -38,10 +34,6 @@ enum class Opcode : std::uint8_t {
 }
 
 struct Frame {
-    bool fin{true};
-    Opcode opcode{Opcode::kText};
-    std::string payload;
-
     /// 就地按 4 字节掩码异或。
     /// 原实现用 data->at(i)，每个字节都带一次边界检查；掩码按 4 字节一轮
     /// 展开后循环体里不再有取模。
@@ -79,7 +71,9 @@ struct Frame {
             out.push_back(static_cast<char>((v >> shift) & 0xFF));
         }
     }
+
+    bool fin{true};
+    Opcode opcode{Opcode::kText};
+    std::string payload;
 };
-} // namespace details
-} // namespace websocket
-} // namespace netx
+} // namespace netx::websocket::details

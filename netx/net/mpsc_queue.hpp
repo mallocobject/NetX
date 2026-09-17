@@ -9,29 +9,12 @@
 namespace netx::net::details {
 
 // 队列接受"可空句柄"：裸指针，或能由 nullptr 构造的类类型
-// （智能指针、Task、自定义句柄都算）。
-//
-//   * 哑节点靠 `T{nullptr}` 构造 —— nullptr 构造是唯一的硬性前提
-//   * 不要求可拷贝、也不要求移动不抛：move-only 的任务队列正是本队列的
-//     主要用途，而"拷贝不抛"只对 push(const T&) 这一个重载有意义，因此
-//     用 requires 单独约束那个重载，不强加给整个类型。Node 的构造函数
-//     也相应不再标 noexcept —— 让可恢复的异常正常传播，而不是变成
-//     std::terminate
-//   * is_class_v 那条专门挡 bool：它恰好也能由 nullptr 构造
-//     （nullptr_t 转 bool 得 false），但语义上根本不是句柄；顺带也挡掉了
-//     uintptr_t 这类整数
 template <typename T>
 concept NullableHandle =
     std::is_pointer_v<T> ||
     (std::is_class_v<T> && std::constructible_from<T, std::nullptr_t>);
 
 // Michael-Scott 队列：哑节点 + head/tail 双 CAS，无锁、无界。
-//
-// 并发契约是 MPSC —— 任意多个生产者，**单个**消费者：
-//   * push() / push(T&&) 可由任意多个线程并发调用
-//   * pop() 必须有且只有一个线程调用
-//   * size() 可从任意线程读，但只是近似值：计数在链接 CAS 之后才自增，
-//     别的线程可能先看到节点、后看到计数
 template <NullableHandle T>
 class MpscQueue {
   private:
@@ -39,23 +22,12 @@ class MpscQueue {
         T value;
         std::atomic<Node *> next;
 
-        // 不标 noexcept：T 的拷贝/移动可能抛，标了就会把可恢复的异常
-        // 变成 std::terminate。这里抛出去是安全的 —— Node 是在进入
-        // pushImpl 之前构造的，异常传播时无锁不变量还没被触碰
         Node(const T &val) : value(val), next(nullptr) {
         }
 
         Node(T &&val) : value(std::move(val)), next(nullptr) {
         }
     };
-
-  private:
-    std::atomic<Node *> head_;
-    std::atomic<Node *> tail_;
-    std::atomic<size_t> count_{0};
-
-  private:
-    void pushImpl(Node *n);
 
   public:
     MpscQueue() {
@@ -88,8 +60,6 @@ class MpscQueue {
         }
     }
 
-    // 拷贝入队只对可拷贝的 T 开放：move-only 句柄（Task、unique_ptr）
-    // 只保留右值重载，对左值调用会得到一条清晰的约束错误
     void push(const T &data)
         requires std::is_copy_constructible_v<T>
     {
@@ -105,6 +75,13 @@ class MpscQueue {
     size_t size() const noexcept {
         return count_.load(std::memory_order_acquire);
     }
+
+  private:
+    void pushImpl(Node *n);
+
+    std::atomic<Node *> head_;
+    std::atomic<Node *> tail_;
+    std::atomic<size_t> count_{0};
 };
 
 template <NullableHandle T>

@@ -7,9 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace netx {
-namespace http {
-
+namespace netx::http::details {
 /// 有序的字段表（header / query 之类）。
 ///
 /// 用 vector 而不是 unordered_map，理由有三：
@@ -19,8 +17,7 @@ namespace http {
 ///     节点；
 ///   - 保留重复键的可能（同名 header 是合法的）。
 ///
-/// 键按调用方给的原文存；header 名的大小写归一由解析器负责（它统一转小写），
-/// 这里不再重复做。
+/// 键按调用方给的原文存；header 名的大小写归一由解析器负责（它统一转小写）
 class FieldMap {
   public:
     using Item = std::pair<std::string, std::string>;
@@ -105,5 +102,4 @@ class FieldMap {
   private:
     std::vector<Item> items_;
 };
-} // namespace http
-} // namespace netx
+} // namespace netx::http::details

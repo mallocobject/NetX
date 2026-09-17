@@ -17,22 +17,6 @@
 
 namespace netx::net::details {
 class Scheduler {
-  private:
-    MpscQueue<core::Task<core::Expected<>>> task_queue_;
-    std::list<core::details::WrappedTask<core::Task<core::Expected<>>>> sts_;
-
-    int wakeup_fd_{-1};
-    core::details::EventLoop::EventAwaiter wakeup_awaiter_;
-
-  private:
-    Scheduler(int wakeup_fd)
-        : wakeup_fd_(wakeup_fd),
-          wakeup_awaiter_(core::details::EventLoop::loop().wait_event(
-              {.fd = wakeup_fd_, .flags = core::details::Event::kEventRead})) {
-    }
-
-    core::Expected<> shallow();
-
   public:
     static core::Expected<Scheduler> create() {
         int wakeup_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
@@ -55,8 +39,6 @@ class Scheduler {
 
     core::Task<core::Expected<>> scheduler_loop(std::latch &start_latch);
 
-    /// 先注销 awaiter 再关 fd：析构体跑在成员析构之前，顺序反了就会拿
-    /// 一个已经关闭的 fd 去 epoll 注销。
     ~Scheduler() {
         (void)wakeup_awaiter_.reset();
         if (wakeup_fd_ >= 0) {
@@ -71,6 +53,21 @@ class Scheduler {
           wakeup_fd_(std::exchange(other.wakeup_fd_, -1)),
           wakeup_awaiter_(std::move(other.wakeup_awaiter_)) {
     }
+
+  private:
+    Scheduler(int wakeup_fd)
+        : wakeup_fd_(wakeup_fd),
+          wakeup_awaiter_(core::details::EventLoop::loop().wait_event(
+              {.fd = wakeup_fd_, .flags = core::details::Event::kEventRead})) {
+    }
+
+    core::Expected<> shallow();
+
+    MpscQueue<core::Task<core::Expected<>>> task_queue_;
+    std::list<core::details::WrappedTask<core::Task<core::Expected<>>>> sts_;
+
+    int wakeup_fd_{-1};
+    core::details::EventLoop::EventAwaiter wakeup_awaiter_;
 };
 
 inline core::Expected<> Scheduler::wakeup() {
@@ -121,16 +118,13 @@ Scheduler::scheduler_loop(std::latch &start_latch) {
     start_latch.count_down();
 
     while (true) {
-        // 等唤醒、读 eventfd。两者失败都应该让整个调度循环带着错误退出 ——
-        // co_await 一个 Expected 正好是这个语义：有值就继续，出错则把
-        // unexpected 写进本任务的结果并冻结在挂起点。
-        // （不能记完日志再 co_return {}：空 Expected 是"成功"，调用方会
-        // 以为循环是正常结束的。）
+        // 等唤醒、读 eventfd。
         co_await co_await wakeup_awaiter_;
         co_await shallow();
 
         core::Task<core::Expected<>> tmp{nullptr};
         while (task_queue_.pop(tmp)) {
+            // 与 netx/core/wrapped_task.hpp:DeleteNodeHandle 配合
             sts_.emplace_back();
             auto it = std::prev(sts_.end());
 

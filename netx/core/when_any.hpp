@@ -20,14 +20,6 @@ namespace details {
 struct WhenAnyCtlBlock {
     static constexpr size_t npos{static_cast<size_t>(-1)};
 
-    size_t winner{npos};
-    /// 真正参与竞速的输入个数。无效输入（空壳 Task）不算 —— 它们既没有
-    /// 等待边，也不该被当成赢家；全都无效时就没必要挂起了。
-    size_t racing{0};
-    CoroHandle *waiter{nullptr};
-    std::exception_ptr exception;
-    std::span<const Task<Expected<>>> tasks;
-
     bool try_complete(size_t index, std::exception_ptr ep) {
         if (winner != npos) {
             return false;
@@ -36,8 +28,7 @@ struct WhenAnyCtlBlock {
         winner = index;
         exception = ep;
 
-        // 其余的都可以不跑了。取消会沿"我正在等谁"这条边继续往下传到各自的
-        // 输入上 —— helper 正 co_await 在它身上。
+        // 一决雌雄
         for (size_t i = 0; i < tasks.size(); ++i) {
             if (i != index) {
                 tasks[i].coro.promise().request_cancel();
@@ -48,18 +39,23 @@ struct WhenAnyCtlBlock {
         if (w == nullptr) {
             return true;
         }
-        // 已经被取消的等待者早就带着 Cancelled 结果定局了（取消一个没有挂起
-        // 记录的协程就是"给它一个结果"），此时再唤醒它，等于让它从挂起点继续
+
+        // 唤醒等待着，等于让它从挂起点继续
         // 往下跑、把那个结果覆盖掉 —— 那才是真正的复活。
         if (!w->cancelled) {
             w->wake(); // 强入队：等待者可能刚被取消过
         }
         return true;
     }
+
+    size_t winner{npos};
+    /// 真正参与竞速的输入个数。无效输入（空壳 Task）不算
+    size_t racing{0};
+    CoroHandle *waiter{nullptr};
+    std::exception_ptr exception;
+    std::span<const Task<Expected<>>> tasks;
 };
 
-/// 能不能问"你有效吗"。Task 有 valid()，而裸 awaiter（比如 EventAwaiter）
-/// 没有，后者一律当成有效的。
 template <typename T>
 constexpr bool is_valid(const T &t) {
     if constexpr (requires { t.valid(); }) {
@@ -81,9 +77,6 @@ Task<Expected<>> WhenAnyHelper(A &&t,
                                WhenAnyCtlBlock &ctl,
                                NonVoidRetType<A> &result,
                                size_t index) {
-    // 空壳输入：没有东西可等。它不算赢家，也不能这么 co_await —— 等一个
-    // 空壳任务等于"被取消"（Task 的 awaiter 会把调用者冻在挂起点），helper
-    // 就再也走不到 try_complete()，when_any 便永远等不到赢家。
     if (!is_valid(t)) {
         co_return {};
     }
@@ -117,8 +110,6 @@ struct WhenAnyAwaiter {
             }
         }
 
-        // 全都无效／没有可等的：不挂起，让 await_resume() 后直接走"没赢家"
-        // 那条路给出 InvalidOperation
         if (ctl.racing == 0) {
             return false;
         }
@@ -140,8 +131,6 @@ struct WhenAnyAwaiter {
 template <size_t... Is, typename... Ts>
 Task<Expected<std::variant<NonVoidRetType<Ts>...>>>
 when_any_impl(std::index_sequence<Is...>, Ts... ts) {
-    // 参数按值收：输入对象必须活到 helper 真正跑起来，而本协程是惰性的 ——
-    // 引用参数会指向调用方那个早就结束的全表达式。
     WhenAnyCtlBlock ctl{};
     ctl.racing = (size_t{0} + ... + (is_valid(ts) ? size_t{1} : size_t{0}));
     std::tuple<NonVoidRetType<Ts>...> results;
@@ -152,11 +141,10 @@ when_any_impl(std::index_sequence<Is...>, Ts... ts) {
     co_await WhenAnyAwaiter{ctl};
 
     using VariantType = std::variant<NonVoidRetType<Ts>...>;
-    // 用 optional 而不是直接建 variant：后者要求第一个备选类型可默认构造，
-    // 而我们只想在赢家那一支里把它建出来。
+
     std::optional<VariantType> out;
 
-    // void 输入的结果已经由 helper 写成 NonVoidHelper，这里统一搬过来即可
+    // void 输入的结果已经由 helper 写成 NonVoidHelper
     ((ctl.winner == Is ? (void)out.emplace(std::in_place_index<Is>,
                                            std::move(std::get<Is>(results)))
                        : (void)0),
@@ -174,17 +162,11 @@ template <typename... Ts>
 auto when_any(Ts... ts) {
     // 按值收再往下挪：Task 是 move-only，调用方传右值（或 std::move）。
     // 这样输入的生命周期就归 when_any 返回的那个任务所有了。
-    //
-    // 这条断言把"哪些输入能用"讲清楚，替掉 WhenAnyHelper 那条晦涩的
-    // "no matching function"。裸 Expected 看着像能进（AwaitableTrait 里
-    // 确实有它的特化），但它没有可等的动作：promise 的 await_transform
-    // 在失败时把结果写进 helper 自己的 promise 并冻结协程，
-    // try_complete() 永远不会被调用，整条 when_any 会静默死等。
     static_assert(
         (details::Awaitable<Ts> && ...),
-        "when_any 的每个输入都必须是 awaitable（本库的 Task<...>，或本身就"
-        "是 awaiter 的类型）；裸 Expected 是已经算好的值，请直接用分支处理，"
-        "不要放进竞速");
+        "every when_any argument must be awaitable (a Task<...> from this "
+        "library, or a type that is itself an awaiter); a bare Expected is an "
+        "already-settled value, handle it with a branch instead of racing it");
     return details::when_any_impl(std::make_index_sequence<sizeof...(Ts)>{},
                                   std::move(ts)...);
 }

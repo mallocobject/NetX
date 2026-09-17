@@ -10,10 +10,7 @@
 #include <string>
 #include <string_view>
 
-namespace netx {
-namespace http {
-namespace details {
-
+namespace netx::http::details {
 /// HTTP/1.x 请求解析器。
 ///
 /// 按"状态 + 整段扫描"实现：每个状态在自己的输入里找结束符，把中间那一段
@@ -79,8 +76,7 @@ struct Parser {
     /// 并关闭连接。
     std::optional<size_t> feed(std::string_view chunk);
 
-    /// 喂完一整段，只看合不合法。
-    bool parse(const std::string &data) {
+    bool parse(std::string_view data) {
         return feed(data).has_value();
     }
 
@@ -359,6 +355,4 @@ inline std::optional<size_t> Parser::feed(std::string_view chunk) {
 
     return i;
 }
-} // namespace details
-} // namespace http
-} // namespace netx
+} // namespace netx::http::details

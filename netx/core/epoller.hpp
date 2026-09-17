@@ -10,24 +10,17 @@
 
 namespace netx::core::details {
 class Epoller {
-  private:
-    std::vector<epoll_event> evs_{1};
-    std::size_t registered_{0};
-    /// epoll 实例，只由本类持有和使用：外面既没有理由读它，读到也没法安全
-    /// 操作（close/ctl 的账都在这里记）。
-    const int epfd{-1};
-
   public:
-    Epoller() : epfd(check_error<>(epoll_create1(0))) {
+    Epoller() : epfd_(check_error<>(epoll_create1(0))) {
     }
 
     Epoller(Epoller &&) = delete;
     ~Epoller() {
-        assert(epfd >= 0);
-        close(epfd);
+        assert(epfd_ >= 0);
+        close(epfd_);
     }
 
-    auto register_event(const Event &event) -> Expected<> {
+    Expected<> register_event(const Event &event) {
         if (auto exp = ctl(EPOLL_CTL_ADD, event); !exp) {
             return exp;
         }
@@ -40,11 +33,11 @@ class Epoller {
         return {};
     }
 
-    auto modify_event(const Event &event) -> Expected<> {
+    Expected<> modify_event(const Event &event) {
         return ctl(EPOLL_CTL_MOD, event);
     }
 
-    auto unregister_event(const Event &event) -> Expected<> {
+    Expected<> unregister_event(const Event &event) {
         if (auto exp = ctl(EPOLL_CTL_DEL, event); !exp) {
             return exp;
         }
@@ -54,9 +47,9 @@ class Epoller {
     }
 
     /// 返回就绪的 fd 列表。交给内核的只有 fd
-    auto poll(int timeout) -> Expected<std::vector<int>> {
+    Expected<std::vector<int>> poll(int timeout) {
         int nevs = epoll_wait(
-            epfd, evs_.data(), static_cast<int>(evs_.size()), timeout);
+            epfd_, evs_.data(), static_cast<int>(evs_.size()), timeout);
         if (nevs == -1) {
             if (errno == EINTR) {
                 return {};
@@ -76,14 +69,18 @@ class Epoller {
     }
 
   private:
-    auto ctl(int op, const Event &event) -> Expected<> {
+    Expected<> ctl(int op, const Event &event) {
         epoll_event ev{.events = event.flags | EPOLLONESHOT,
                        .data{.fd = event.fd}};
-        if (epoll_ctl(epfd, op, event.fd, &ev) == -1) {
+        if (epoll_ctl(epfd_, op, event.fd, &ev) == -1) {
             return from_errno_to_unexpected(errno);
         }
 
         return {};
     }
+
+    std::vector<epoll_event> evs_{1};
+    std::size_t registered_{0};
+    const int epfd_{-1};
 };
 } // namespace netx::core::details

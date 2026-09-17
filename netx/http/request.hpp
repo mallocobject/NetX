@@ -4,12 +4,9 @@
 #include <string>
 #include <string_view>
 
-namespace netx {
-namespace http {
-
+namespace netx::http {
 struct Request {
     /// header 名由解析器统一转小写后存入，这里按原文查即可。
-    /// 返回 string_view：取值不该附带一次拷贝。
     [[nodiscard]] std::string_view header(std::string_view key) const {
         return header_params.get(key);
     }
@@ -42,13 +39,12 @@ struct Request {
     std::string url_path;
     std::string version;
 
-    FieldMap header_params;
-    FieldMap query_params;
-    FieldMap path_params;
+    details::FieldMap header_params;
+    details::FieldMap query_params;
+    details::FieldMap path_params;
 
     std::string body;
     bool keep_alive{false};
     size_t ctx_len{0};
 };
-} // namespace http
-} // namespace netx
+} // namespace netx::http

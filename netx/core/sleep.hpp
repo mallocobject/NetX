@@ -11,11 +11,8 @@ namespace netx::core {
 namespace details {
 template <typename Duration>
 class SleepAwaiter {
-  private:
-    Duration dora{};
-
   public:
-    explicit SleepAwaiter(Duration &&duration) : dora(std::move(duration)) {
+    explicit SleepAwaiter(Duration &&duration) : dora_(std::move(duration)) {
     }
 
     bool await_ready() const noexcept {
@@ -24,11 +21,14 @@ class SleepAwaiter {
 
     template <Promise P>
     void await_suspend(std::coroutine_handle<P> coro) const noexcept {
-        EventLoop::loop().call_after(dora, coro.promise());
+        EventLoop::loop().call_after(dora_, coro.promise());
     }
 
     void await_resume() const noexcept {
     }
+
+  private:
+    Duration dora_{};
 };
 
 /// 立即启动的实现层：签名里带 NoWaitAtInitialSuspend，promise 的

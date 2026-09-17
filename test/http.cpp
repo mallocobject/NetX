@@ -14,8 +14,8 @@
 
 #include <string>
 
-using netx::http::FieldMap;
 using netx::http::Response;
+using netx::http::details::FieldMap;
 using netx::http::details::Parser;
 using netx::http::details::RadixTree;
 

@@ -4,9 +4,8 @@
 #include "netx/core/handle.hpp"
 
 namespace netx::core::details {
-class CoroHandle : public Handle {
-  public:
-    /// 交给当前线程的事件循环执行；调度记录的唯一所有者仍然是 EventLoop
+struct CoroHandle : public Handle {
+    /// 交给当前线程的事件循环执行
     void schedule() {
         EventLoop::loop().call_soon(*this);
     }
@@ -18,10 +17,6 @@ class CoroHandle : public Handle {
     }
 
     /// 强制回到事件循环，绕开 call_soon 里"已取消的 handle 不再入队"的守卫。
-    ///
-    /// 取消路径需要它：被取消的协程也必须被唤醒一次，好让它的 co_await 拿到
-    /// Cancelled 结果、或者让父协程去读被取消的子任务的结果。若用 schedule()，
-    /// 那次唤醒会被守卫挡下，等待者就永远等不到人来叫它。
     void wake() {
         EventLoop::loop().wake(*this);
     }

@@ -6,7 +6,6 @@
 #include "netx/core/handle.hpp"
 #include <algorithm>
 #include <chrono>
-#include <cstdint>
 #include <iterator>
 #include <list>
 #include <optional>
@@ -18,13 +17,6 @@ namespace netx::core::details {
 class EventLoop;
 
 /// 等待一个 fd 上的事件。
-///
-/// 放在命名空间作用域而不是 EventLoop 内部：Handle 的挂起记录槽要能直接存
-/// 它的指针，而嵌套类在 handle.hpp 里没法前置声明。
-///
-/// 成员函数里要碰 EventLoop 的私有状态（epoller_、remember_event、
-/// forget_event），所以 EventLoop 把它声明成友元；定义则一律放到 EventLoop
-/// 完整之后。
 class EventAwaiter {
   private:
     EventLoop &loop_;
@@ -41,8 +33,23 @@ class EventAwaiter {
         (void)reset();
     }
 
-    EventAwaiter(EventAwaiter &&other) noexcept;
-    EventAwaiter &operator=(EventAwaiter &&other) noexcept;
+    EventAwaiter(EventAwaiter &&other) noexcept
+        : loop_(other.loop_), event_(other.event_),
+          registered_(std::exchange(other.registered_, false)),
+          exp_(std::move(other.exp_)) {
+    }
+
+    EventAwaiter &operator=(EventAwaiter &&other) noexcept {
+        if (this == &other) {
+            return *this;
+        }
+
+        (void)reset();
+        event_ = other.event_;
+        registered_ = std::exchange(other.registered_, false);
+        exp_ = std::move(other.exp_);
+        return *this;
+    }
 
     bool await_ready() const noexcept {
         return false;
@@ -59,16 +66,14 @@ class EventAwaiter {
     Expected<> reset() noexcept;
 
     /// 由 EventLoop::cancel() 调用：注销 fd 并把结果置为 Cancelled。
-    /// 重新入队由 EventLoop 负责 —— 那边手里才有 Handle&。
     void on_cancel() noexcept {
         (void)reset();
-        exp_ = std::unexpected(make_error_code(Error::Cancelled));
+        exp_ = make_error_to_unexpected(Error::Cancelled);
     }
 };
 
 class EventLoop {
   public:
-    /// 沿用 EventLoop::EventAwaiter 这个写法
     using EventAwaiter = netx::core::details::EventAwaiter;
 
     friend class netx::core::details::EventAwaiter;
@@ -83,78 +88,7 @@ class EventLoop {
 
     using Kind = Handle::SlotKind;
 
-  private:
-    Epoller epoller_{};
-
-    std::list<HandleInfo> ready_; // FIFO，可 O(1) 摘除
-    std::set<TimerEntry> scheduled_;
-    std::unordered_map<int, Handle *> fd_owner_; // 就绪 fd -> handle，回填用
-
-    /// 当前持有挂起记录的 handle 数。挂起记录内联在 Handle 里之后，没有
-    /// 一张表可以问"还有没有待办"了，就靠这个计数。
-    size_t pending_{0};
-
-  private:
-    EventLoop() = default;
-
-    /// 登记/改写挂起记录。从"无记录"进入时才计数 +1。
-    void mark(Handle &handle, Kind kind) {
-        if (handle.slot_kind == Kind::kNone) {
-            ++pending_;
-        }
-        handle.slot_kind = kind;
-    }
-
-    /// 清掉挂起记录。本来就无记录时是空操作。
-    void clear(Handle &handle) {
-        if (handle.slot_kind != Kind::kNone) {
-            handle.slot_kind = Kind::kNone;
-            --pending_;
-        }
-    }
-
-    /// 入队并登记记录。
-    ///
-    /// 不变量：ready_ 里有节点 ⟺ 该 handle 的槽是 kReady。
-    /// 已经在队列里就直接返回 —— 重复入队会让 run() 被调两次，而在一个
-    /// 已完成的协程上再 resume 是未定义行为。
-    void enqueue_ready(Handle &handle) {
-        if (handle.slot_kind == Kind::kReady) {
-            return;
-        }
-
-        ready_.push_back({.handle = &handle, .id = handle.id});
-        mark(handle, Kind::kReady);
-        handle.slot.ready = std::prev(ready_.end());
-    }
-
-    /// 登记一次 epoll 等待：fd -> handle 供事件回填，槽里的 awaiter 供
-    /// cancel() 撤销注册
-    void remember_event(Handle &handle, int fd, EventAwaiter *awaiter) {
-        fd_owner_.insert_or_assign(fd, &handle);
-        mark(handle, Kind::kEvent);
-        handle.slot.awaiter = awaiter;
-    }
-
-    /// 注销 fd 登记并清掉该 handle 的 kEvent 槽（幂等）。
-    /// 按 fd 而不是按 id：EventAwaiter 的析构路径上只有 fd。
-    void forget_event(int fd) {
-        auto it = fd_owner_.find(fd);
-        if (it == fd_owner_.end()) {
-            return;
-        }
-
-        if (it->second != nullptr && it->second->slot_kind == Kind::kEvent) {
-            clear(*it->second);
-        }
-        fd_owner_.erase(it);
-    }
-
-    Expected<> run_once();
-
   public:
-    /// 还有没有待办。挂起记录内联在各自的 Handle 里，pending_ 是它们的
-    /// 计数：mark() 从 kNone 进入时 +1，clear() 归零时 -1。
     [[nodiscard]] bool stopped() const noexcept {
         return pending_ == 0;
     }
@@ -173,11 +107,11 @@ class EventLoop {
         enqueue_ready(handle);
     }
 
-    /// 强制入队，绕开上面那条守卫。
+    /// 强制入队
     ///
     /// 取消路径必须能把等待者叫回来：被取消的一方要醒一次，才能读到
     /// Cancelled 结果、并把取消传给自己的等待者（见 CoroHandle::wake）。
-    /// 用 call_soon 会被守卫挡下，链条就断在这里。
+    /// 用 call_soon 会被挡下
     void wake(Handle &handle) {
         enqueue_ready(handle);
     }
@@ -189,9 +123,8 @@ class EventLoop {
             return;
         }
 
-        auto [it, inserted] =
+        auto [it, _] =
             scheduled_.insert({tp, {.handle = &handle, .id = handle.id}});
-        (void)inserted;
         mark(handle, Kind::kTimer);
         handle.slot.timer = it;
     }
@@ -216,13 +149,10 @@ class EventLoop {
     ///
     /// - 就绪队列里的：从队列摘除，之后不会再被执行；
     /// - 定时器：从集合里摘除，循环也不必再为它等待；
-    /// - 挂起在 epoll 上的：注销 fd（内核侧的账必须现在销，否则 stopped()
-    ///   永远为假、循环会死锁在 poll(-1)），再把结果置为 Cancelled 并重新
+    /// - 挂起在 epoll 上的：注销 fd，再把结果置为 Cancelled 并重新
     ///   入队，让协程以错误的形式恢复、有机会协作收尾；
     /// - 正等子任务的父协程：它自己没有挂起记录（记录属于子任务），这里只
     ///   能沿 waiting_on 去取消那个子任务，唤醒由子任务的收尾负责；
-    /// - 以上都没有：由 on_cancel() 给它一个取消结果并叫醒它的等待者 ——
-    ///   否则上游就永久挂在那里了。
     void cancel(Handle &handle) {
         handle.cancelled = true;
 
@@ -237,7 +167,7 @@ class EventLoop {
             break;
         case kEvent: {
             auto *awaiter = handle.slot.awaiter;
-            clear(handle); // 先销账，下面的入队要建的是新记录
+            clear(handle);
             awaiter->on_cancel(); // 注销 fd，并把结果置为 Cancelled
             // 直接入队（绕开 cancelled 守卫），让它以错误的形式恢复
             enqueue_ready(handle);
@@ -279,7 +209,7 @@ class EventLoop {
             break;
         case Kind::kEvent: {
             auto *awaiter = handle.slot.awaiter;
-            clear(handle); // 先销账，reset() 内部还会再走一次 forget_event
+            clear(handle);
             (void)awaiter->reset();
             return;
         }
@@ -304,6 +234,72 @@ class EventLoop {
         thread_local EventLoop loop_{};
         return loop_;
     }
+
+  private:
+    EventLoop() = default;
+
+    /// 登记/改写挂起记录。从"无记录"进入时才计数 +1。
+    void mark(Handle &handle, Kind kind) {
+        if (handle.slot_kind == Kind::kNone) {
+            ++pending_;
+        }
+        handle.slot_kind = kind;
+    }
+
+    /// 清掉挂起记录.
+    void clear(Handle &handle) {
+        if (handle.slot_kind != Kind::kNone) {
+            handle.slot_kind = Kind::kNone;
+            --pending_;
+        }
+    }
+
+    /// 入队并登记记录。
+    ///
+    /// 不变量：ready_ 里有节点 ⟺ 该 handle 的槽是 kReady。
+    /// 已经在队列里就直接返回 —— 重复入队会让 run() 被调两次。
+    void enqueue_ready(Handle &handle) {
+        if (handle.slot_kind == Kind::kReady) {
+            return;
+        }
+
+        ready_.push_back({.handle = &handle, .id = handle.id});
+        mark(handle, Kind::kReady);
+        handle.slot.ready = std::prev(ready_.end());
+    }
+
+    /// 登记一次 epoll 等待：fd -> handle 供事件回填，槽里的 awaiter 供
+    /// cancel() 撤销注册
+    void remember_event(Handle &handle, int fd, EventAwaiter *awaiter) {
+        fd_owner_.insert_or_assign(fd, &handle);
+        mark(handle, Kind::kEvent);
+        handle.slot.awaiter = awaiter;
+    }
+
+    /// 注销 fd 登记并清掉该 handle 的 kEvent 槽（幂等）。
+    void forget_event(int fd) {
+        auto it = fd_owner_.find(fd);
+        if (it == fd_owner_.end()) {
+            return;
+        }
+
+        if (it->second != nullptr && it->second->slot_kind == Kind::kEvent) {
+            clear(*it->second);
+        }
+        fd_owner_.erase(it);
+    }
+
+    Expected<> run_once();
+
+  private:
+    Epoller epoller_{};
+
+    std::list<HandleInfo> ready_; // FIFO，可 O(1) 摘除
+    std::set<TimerEntry> scheduled_;
+    std::unordered_map<int, Handle *> fd_owner_; // 就绪 fd -> handle，回填用
+
+    /// 当前持有挂起记录的 handle 数。
+    size_t pending_{0};
 };
 
 inline Expected<> EventLoop::run_once() {
@@ -325,15 +321,10 @@ inline Expected<> EventLoop::run_once() {
                         if (auto it = fd_owner_.find(fd);
                             it != fd_owner_.end() && it->second) {
                             auto *handle = it->second;
-                            // kEvent -> kReady：fd 就绪了。先在**这里**把内核侧
-                            // 的账销掉（而不是等协程恢复时由 ~EventAwaiter
-                            // 去销），否则排队中的 handle 还挂在 epoll 上，
-                            // 之后把它取消也摘不掉那条注册，fd 再就绪一次
-                            // 就把它唤醒了。
                             if (handle->slot_kind == Kind::kEvent) {
                                 (void)handle->slot.awaiter->reset();
                             }
-                            // 已取消的不再被事件唤醒（它欠的是结果，不是继续跑）
+
                             if (!handle->cancelled) {
                                 enqueue_ready(*handle);
                             }
@@ -353,8 +344,7 @@ inline Expected<> EventLoop::run_once() {
             break;
         }
         if (info.handle) {
-            // 这个 handle 的槽会从 kTimer 改写成 kReady；定时器条目本身则由
-            // 循环的第三子句 erase 掉
+            // kTimer -> kReady
             enqueue_ready(*info.handle);
         }
     }
@@ -363,9 +353,6 @@ inline Expected<> EventLoop::run_once() {
         auto info = std::move(ready_.front());
         ready_.pop_front();
 
-        // 先销记录：run() 里若重新入队，那是全新的一轮，不该被这次销账带走。
-        // 只销 kReady —— 按不变量此刻它就该是 kReady，加这道判断是为了让
-        // 计数不会因为任何意外的不一致而漂移。
         if (info.handle != nullptr && info.handle->slot_kind == Kind::kReady) {
             clear(*info.handle);
         }
@@ -376,26 +363,6 @@ inline Expected<> EventLoop::run_once() {
     }
 
     return {};
-}
-
-// --- EventAwaiter 的定义：必须等 EventLoop 完整，才能碰它的私有成员 ---
-
-inline EventAwaiter::EventAwaiter(EventAwaiter &&other) noexcept
-    : loop_(other.loop_), event_(other.event_),
-      registered_(std::exchange(other.registered_, false)),
-      exp_(std::move(other.exp_)) {
-}
-
-inline EventAwaiter &EventAwaiter::operator=(EventAwaiter &&other) noexcept {
-    if (this == &other) {
-        return *this;
-    }
-
-    (void)reset();
-    event_ = other.event_;
-    registered_ = std::exchange(other.registered_, false);
-    exp_ = std::move(other.exp_);
-    return *this;
 }
 
 inline Expected<> EventAwaiter::reset() noexcept {

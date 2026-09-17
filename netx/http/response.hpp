@@ -5,13 +5,13 @@
 #include <string>
 #include <string_view>
 
-namespace netx {
-namespace http {
+namespace netx::http {
 namespace details {
 enum class ResponseType : std::uint8_t { kBody, kFile };
 } // namespace details
 
-struct Response {
+class Response {
+  public:
     Response &with_status(int code) noexcept {
         status_code = code;
         status_msg_ = code2msg(code);
@@ -59,8 +59,6 @@ struct Response {
     }
 
   private:
-    /// 状态码到原因短语。用 switch 而不是查表：每次响应都要走一次，
-    /// 而哈希表在这里既慢又要建静态对象。
     [[nodiscard]] static std::string_view code2msg(int code) noexcept {
         switch (code) {
         case 101:
@@ -111,38 +109,27 @@ struct Response {
 
         if (ext == ".html" || ext == ".htm") {
             return "text/html; charset=utf-8";
-        }
-        if (ext == ".css") {
+        } else if (ext == ".css") {
             return "text/css; charset=utf-8";
-        }
-        if (ext == ".js" || ext == ".mjs") {
+        } else if (ext == ".js" || ext == ".mjs") {
             return "application/javascript; charset=utf-8";
-        }
-        if (ext == ".json") {
+        } else if (ext == ".json") {
             return "application/json; charset=utf-8";
-        }
-        if (ext == ".svg") {
+        } else if (ext == ".svg") {
             return "image/svg+xml; charset=utf-8";
-        }
-        if (ext == ".png") {
+        } else if (ext == ".png") {
             return "image/png";
-        }
-        if (ext == ".jpg" || ext == ".jpeg") {
+        } else if (ext == ".jpg" || ext == ".jpeg") {
             return "image/jpeg";
-        }
-        if (ext == ".gif") {
+        } else if (ext == ".gif") {
             return "image/gif";
-        }
-        if (ext == ".webp") {
+        } else if (ext == ".webp") {
             return "image/webp";
-        }
-        if (ext == ".ico") {
+        } else if (ext == ".ico") {
             return "image/x-icon";
-        }
-        if (ext == ".txt") {
+        } else if (ext == ".txt") {
             return "text/plain; charset=utf-8";
-        }
-        if (ext == ".mp4") {
+        } else if (ext == ".mp4") {
             return "video/mp4";
         }
         return "application/octet-stream";
@@ -152,7 +139,7 @@ struct Response {
     int status_code{404};
     std::string status_msg_{code2msg(404)};
     std::string version_{"HTTP/1.1"};
-    FieldMap header_params_;
+    details::FieldMap header_params_;
     std::string body;
 
     details::ResponseType type{details::ResponseType::kBody};
@@ -191,5 +178,4 @@ inline std::string Response::to_formatted_string() const {
     result += body;
     return result;
 }
-} // namespace http
-} // namespace netx
+} // namespace netx::http

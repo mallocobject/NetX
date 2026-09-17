@@ -8,33 +8,31 @@
 #include <cstring>
 #include <string_view>
 
-namespace netx {
-namespace websocket {
-namespace details {
-
+namespace netx::websocket::details {
 /// 一条 WebSocket 连接。只做帧的收发，不做分片重组 —— 调用方拿到
 /// kContinuation 帧后自行拼接。
-struct Connection {
+class Connection {
+  public:
     inline static constexpr size_t kMaxPayloadSize = 10 * 1024 * 1024;
 
     core::Task<core::Expected<Frame>> receive();
 
-    core::Task<core::Expected<>> send_continuation(const std::string &data) {
+    core::Task<core::Expected<>> send_continuation(std::string_view data) {
         co_return co_await send_frame(Opcode::kContinuation, data);
     }
-    core::Task<core::Expected<>> send_text(const std::string &data) {
+    core::Task<core::Expected<>> send_text(std::string_view data) {
         co_return co_await send_frame(Opcode::kText, data);
     }
-    core::Task<core::Expected<>> send_binary(const std::string &data) {
+    core::Task<core::Expected<>> send_binary(std::string_view data) {
         co_return co_await send_frame(Opcode::kBinary, data);
     }
-    core::Task<core::Expected<>> send_close(const std::string &data) {
+    core::Task<core::Expected<>> send_close(std::string_view data) {
         co_return co_await send_frame(Opcode::kClose, data);
     }
-    core::Task<core::Expected<>> send_ping(const std::string &data) {
+    core::Task<core::Expected<>> send_ping(std::string_view data) {
         co_return co_await send_frame(Opcode::kPing, data);
     }
-    core::Task<core::Expected<>> send_pong(const std::string &data) {
+    core::Task<core::Expected<>> send_pong(std::string_view data) {
         co_return co_await send_frame(Opcode::kPong, data);
     }
 
@@ -43,7 +41,7 @@ struct Connection {
 
   private:
     core::Task<core::Expected<>>
-    send_frame(Opcode opcode, const std::string &payload, bool fin = true);
+    send_frame(Opcode opcode, std::string_view payload, bool fin = true);
 
     /// 攒够 n 字节再返回。只在需要时才真的读，所以一个帧最多读两次。
     core::Task<core::Expected<>> ensure_read(size_t n) {
@@ -53,7 +51,6 @@ struct Connection {
         co_return {};
     }
 
-  private:
     net::details::Stream &stream_;
 };
 
@@ -125,7 +122,7 @@ inline core::Task<core::Expected<Frame>> Connection::receive() {
 }
 
 inline core::Task<core::Expected<>>
-Connection::send_frame(Opcode opcode, const std::string &payload, bool fin) {
+Connection::send_frame(Opcode opcode, std::string_view payload, bool fin) {
     if (is_control(opcode) && payload.size() > 125) {
         co_return core::details::make_error_to_unexpected(
             core::details::Error::InvalidOperation);
@@ -150,6 +147,4 @@ Connection::send_frame(Opcode opcode, const std::string &payload, bool fin) {
     const std::array<std::string_view, 2> parts{header, payload};
     co_return co_await stream_.write_many(parts);
 }
-} // namespace details
-} // namespace websocket
-} // namespace netx
+} // namespace netx::websocket::details

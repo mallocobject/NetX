@@ -3,10 +3,10 @@
 #include "netx/http/parser.hpp"
 #include "netx/http/request.hpp"
 #include "netx/net/buffer.hpp"
-namespace netx {
-namespace http {
-namespace details {
-struct Session {
+
+namespace netx::http::details {
+class Session {
+  public:
     bool completed() const noexcept {
         return parser_.completed();
     }
@@ -43,6 +43,4 @@ inline bool Session::parse(net::details::Buffer &buf) {
     buf.retrieve(*consumed);
     return true;
 }
-} // namespace details
-} // namespace http
-} // namespace netx
+} // namespace netx::http::details
