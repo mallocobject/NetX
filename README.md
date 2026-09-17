@@ -21,19 +21,16 @@
 ---
 
 NetX is a header-only C++23 coroutine network framework for Linux, built on
-epoll. It ships with an HTTP/WebSocket server and an async file logger — the
+epoll. It ships with an HTTP/WebSocket server — the
 only third-party dependency is OpenSSL (WebSocket handshake).
 
 ## Build
 
-Requires **GCC 14 or newer** — `elog` uses C++23 `std::print`, which GCC only
-ships from 14. On a system where `c++` is older, point CMake at the right one:
-
 ```bash
-cmake -S . -B build -DCMAKE_CXX_COMPILER=g++-14
+cmake -S . -B build -DCMAKE_CXX_COMPILER=g++
 cmake --build build -j                    # elog, netx, netx_test and all examples
 
-cmake -S examples -B examples/build -DCMAKE_CXX_COMPILER=g++-14
+cmake -S examples -B examples/build -DCMAKE_CXX_COMPILER=g++
 cmake --build examples/build -j           # examples only
 ```
 
@@ -125,38 +122,3 @@ Core coroutine primitives: `Task<T>`, `Expected<T>`, `sleep`, `when_any`,
 ./examples/build/netx_ws          # http://127.0.0.1:8081/
 ./examples/build/netx_tcp_echo    # echo | nc 127.0.0.1 8082
 ```
-
-## Logging
-
-```bash
-ELOG_PATH=/absolute/log/dir ELOG_LEVEL=DEBUG ./build/test/netx_test
-```
-
-`ELOG_PATH` sets the log directory — a missing directory degrades to
-terminal-only logging, it is not an error. `ELOG_LEVEL` filters both terminal
-and file output. The levels are `TRACE DEBUG INFO WARN ERROR FATAL`; there is
-**no OFF**, so `FATAL` is as quiet as the threshold goes while FATAL lines
-themselves still print.
-
-Levels are assigned by audience:
-
-| Level | Used for |
-| --- | --- |
-| `FATAL` | The service cannot start or has stopped: listen failure, a route whose parameter name conflicts, the accept loop giving up |
-| `ERROR` | Still serving, but something is wrong: an unexpected exception in a client, mmap failing |
-| `WARN` | Degraded and handled: EMFILE, the connection limit, one accept() or dup() failing |
-| `INFO` | Service lifecycle only: the listener address |
-| `DEBUG` | Per-connection diagnostics: accept, close with reason and request count, read and send failures |
-
-Two things worth knowing before relying on the output:
-
-- Terminal logging goes to stdout with `std::println`, which is block-buffered
-  when redirected to a file. Killing the process discards whatever has not been
-  flushed — add `stdbuf -oL`, or log through `ELOG_PATH` instead.
-- File logging flushes in batches, every `flush_interval` (three seconds by
-  default). `set_log_path(dir, prefix, roll_size, flush_interval, per_count)`
-  takes a smaller one.
-
-The examples set `set_log_threshold(LogLevel::FATAL)`, so they are quiet apart
-from FATAL. Remove that line, or set the threshold back to `INFO`, to see
-connection-level logging.
