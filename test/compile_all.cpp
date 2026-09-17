@@ -22,7 +22,7 @@
 #include "netx/net/address.hpp"
 #include "netx/net/buffer.hpp"
 #include "netx/net/endian.hpp"
-#include "netx/net/lock_free_queue.hpp"
+#include "netx/net/mpsc_queue.hpp"
 #include "netx/net/scheduler.hpp"
 #include "netx/net/server.hpp"
 #include "netx/net/socket.hpp"

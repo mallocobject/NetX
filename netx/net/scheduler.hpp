@@ -3,7 +3,7 @@
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
 #include "netx/core/wrapped_task.hpp"
-#include "netx/net/lock_free_queue.hpp"
+#include "netx/net/mpsc_queue.hpp"
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -18,7 +18,7 @@
 namespace netx::net::details {
 class Scheduler {
   private:
-    LockFreeQueue<core::Task<core::Expected<>>> task_queue_;
+    MpscQueue<core::Task<core::Expected<>>> task_queue_;
     std::list<core::details::WrappedTask<core::Task<core::Expected<>>>> sts_;
 
     int wakeup_fd_{-1};

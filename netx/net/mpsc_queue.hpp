@@ -33,7 +33,7 @@ concept NullableHandle =
 //   * size() 可从任意线程读，但只是近似值：计数在链接 CAS 之后才自增，
 //     别的线程可能先看到节点、后看到计数
 template <NullableHandle T>
-class LockFreeQueue {
+class MpscQueue {
   private:
     struct Node {
         T value;
@@ -58,14 +58,14 @@ class LockFreeQueue {
     void pushImpl(Node *n);
 
   public:
-    LockFreeQueue() {
+    MpscQueue() {
         Node *dummy = new Node(T{nullptr});
 
         head_.store(dummy, std::memory_order_release);
         tail_.store(dummy, std::memory_order_release);
     }
 
-    LockFreeQueue(LockFreeQueue &&other) noexcept {
+    MpscQueue(MpscQueue &&other) noexcept {
         Node *old_head = other.head_.load(std::memory_order_relaxed);
         head_.store(old_head, std::memory_order_relaxed);
         other.head_.store(nullptr, std::memory_order_relaxed);
@@ -79,7 +79,7 @@ class LockFreeQueue {
         other.count_.store(0, std::memory_order_relaxed);
     }
 
-    ~LockFreeQueue() {
+    ~MpscQueue() {
         Node *cur = head_.load(std::memory_order_acquire);
         while (cur) {
             Node *next = cur->next.load(std::memory_order_acquire);
@@ -108,7 +108,7 @@ class LockFreeQueue {
 };
 
 template <NullableHandle T>
-void LockFreeQueue<T>::pushImpl(Node *n) {
+void MpscQueue<T>::pushImpl(Node *n) {
     Node *tail_ptr = nullptr;
     while (true) {
         tail_ptr = tail_.load(std::memory_order_acquire);
@@ -139,7 +139,7 @@ void LockFreeQueue<T>::pushImpl(Node *n) {
 }
 
 template <NullableHandle T>
-bool LockFreeQueue<T>::pop(T &out) {
+bool MpscQueue<T>::pop(T &out) {
     while (true) {
         Node *head_ptr = head_.load(std::memory_order_acquire);
         Node *tail_ptr = tail_.load(std::memory_order_acquire);

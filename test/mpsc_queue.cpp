@@ -1,11 +1,11 @@
-// netx/net/lock_free_queue.hpp 的测试。
+// netx/net/mpsc_queue.hpp 的测试。
 //
 // 这是 Michael-Scott 队列（哑节点 head + tail 双 CAS）。
 //
 // 并发能力只有 SPSC 一种用法是安全的，见文件末尾两个并发用例的说明。
 // T 被约束为指针类型（PointerValue），下面的 static_assert 锁定这条约束。
 
-#include "netx/net/lock_free_queue.hpp"
+#include "netx/net/mpsc_queue.hpp"
 
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
@@ -23,13 +23,13 @@
 #include <utility>
 #include <vector>
 
-using netx::net::details::LockFreeQueue;
+using netx::net::details::MpscQueue;
 
 // ---------------------------------------------------------------- 类型约束
 
 namespace {
 template <typename T>
-concept Instantiable = requires { typename LockFreeQueue<T>; };
+concept Instantiable = requires { typename MpscQueue<T>; };
 
 // 自定义句柄：类类型 + nullptr 构造 + 拷贝/移动都不抛
 struct Handle {
@@ -96,7 +96,7 @@ struct ValuePool {
 } // namespace
 
 TEST_CASE("智能指针句柄可以正常入队出队", "[net][lfq]") {
-    LockFreeQueue<std::shared_ptr<int>> q;
+    MpscQueue<std::shared_ptr<int>> q;
 
     auto shared = std::make_shared<int>(42);
     q.push(shared); // 左值 -> 拷贝入队，引用计数 +1
@@ -122,7 +122,7 @@ TEST_CASE("智能指针句柄可以正常入队出队", "[net][lfq]") {
 }
 
 TEST_CASE("move-only 句柄可以正常入队出队", "[net][lfq]") {
-    LockFreeQueue<std::unique_ptr<int>> q;
+    MpscQueue<std::unique_ptr<int>> q;
 
     q.push(std::make_unique<int>(42));
     q.push(std::make_unique<int>(7));
@@ -138,7 +138,7 @@ TEST_CASE("move-only 句柄可以正常入队出队", "[net][lfq]") {
 }
 
 TEST_CASE("自定义可空句柄可以正常入队出队", "[net][lfq]") {
-    LockFreeQueue<Handle> q;
+    MpscQueue<Handle> q;
 
     Handle first{};
     first.id = 5;
@@ -158,7 +158,7 @@ TEST_CASE("自定义可空句柄可以正常入队出队", "[net][lfq]") {
 }
 
 TEST_CASE("空队列 pop 返回 false", "[net][lfq]") {
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     int *out = nullptr;
     CHECK_FALSE(q.pop(out));
@@ -166,7 +166,7 @@ TEST_CASE("空队列 pop 返回 false", "[net][lfq]") {
 }
 
 TEST_CASE("push / pop 保持 FIFO 顺序", "[net][lfq]") {
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     int a = 1;
     int b = 2;
@@ -188,7 +188,7 @@ TEST_CASE("push / pop 保持 FIFO 顺序", "[net][lfq]") {
 }
 
 TEST_CASE("size 随 push 与 pop 增减", "[net][lfq]") {
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     std::vector<int> values(64);
     for (int i = 0; i < 64; ++i) {
@@ -206,7 +206,7 @@ TEST_CASE("size 随 push 与 pop 增减", "[net][lfq]") {
 }
 
 TEST_CASE("大量元素按入队顺序出队", "[net][lfq]") {
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     constexpr int kCount = 10000;
     std::vector<int> values(kCount);
@@ -227,7 +227,7 @@ TEST_CASE("大量元素按入队顺序出队", "[net][lfq]") {
 }
 
 TEST_CASE("移动构造把元素整体转移", "[net][lfq]") {
-    LockFreeQueue<int *> src;
+    MpscQueue<int *> src;
 
     std::vector<int> values(16);
     for (int i = 0; i < 16; ++i) {
@@ -235,7 +235,7 @@ TEST_CASE("移动构造把元素整体转移", "[net][lfq]") {
         src.push(&values[static_cast<std::size_t>(i)]);
     }
 
-    LockFreeQueue<int *> moved{std::move(src)};
+    MpscQueue<int *> moved{std::move(src)};
     CHECK(moved.size() == 16);
     CHECK(src.size() == 0); // 源队列清空
 
@@ -249,7 +249,7 @@ TEST_CASE("移动构造把元素整体转移", "[net][lfq]") {
 
 TEST_CASE("未出队的元素在析构时释放", "[net][lfq]") {
     // 只压不出，析构后不应有泄漏（交给 ASan/LSan 判定）
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     std::vector<int> values(100);
     for (int i = 0; i < 100; ++i) {
@@ -274,7 +274,7 @@ TEST_CASE("单生产者单消费者：不丢不重", "[net][lfq][thread]") {
     constexpr int kCount = 100000;
 
     ValuePool pool{1, kCount};
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     std::atomic<bool> producer_done{false};
     std::vector<int> got;
@@ -325,7 +325,7 @@ TEST_CASE("多生产者单消费者：不丢不重", "[net][lfq][thread]") {
     constexpr int kTotal = kProducers * kPerProducer;
 
     ValuePool pool{kProducers, kPerProducer};
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     std::atomic<bool> producers_done{false};
     std::vector<int> got;
@@ -389,7 +389,7 @@ TEST_CASE("多生产者多消费者：当前实现会 heap-use-after-free",
     constexpr int kTotal = kProducers * kPerProducer;
 
     ValuePool pool{kProducers, kPerProducer};
-    LockFreeQueue<int *> q;
+    MpscQueue<int *> q;
 
     std::atomic<int> consumed{0};
     std::atomic<bool> producers_done{false};
