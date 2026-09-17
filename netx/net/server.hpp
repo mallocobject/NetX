@@ -267,6 +267,11 @@ inline void Server::start(this auto &self) {
                    self.stream_.sock_addr.to_formatted_string());
 
     core::async_main(self.server_loop());
+
+    // 走到这里说明 accept 循环已经退出，进程接下来就会结束。这条不能少：
+    // 否则服务"跑着跑着就没了"，而日志里一句解释都没有。
+    elog::LOG_FATAL("server loop exited; the server is no longer accepting "
+                    "connections");
 }
 
 template <typename Self>

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "elog/logger.hpp"
 #include "netx/core/expected.hpp"
 #include "netx/core/task.hpp"
 #include "netx/core/wrapped_task.hpp"
@@ -119,8 +120,23 @@ Scheduler::scheduler_loop(std::latch &start_latch) {
 
     while (true) {
         // 等唤醒、读 eventfd。
-        co_await co_await wakeup_awaiter_;
-        co_await shallow();
+        // 出错就退出整个调度循环。这里必须自己记一笔：本任务的返回值没有
+        // 任何调用方会读（server 把它 push 进队列就撒手了，WrappedTask 跑完
+        // 自摘节点销毁），错误会无声无息地消失 —— 表现为"服务还在跑，但
+        // 这个 worker 再也不处理任何连接"，外部只能看到大片超时。
+        if (auto exp = co_await wakeup_awaiter_; !exp) {
+            elog::LOG_FATAL("scheduler: waiting for wakeup failed: {}; this "
+                            "worker no longer serves connections",
+                            exp.error().message());
+            co_return std::unexpected{exp.error()};
+        }
+
+        if (auto exp = shallow(); !exp) {
+            elog::LOG_FATAL("scheduler: draining the wakeup fd failed: {}; "
+                            "this worker no longer serves connections",
+                            exp.error().message());
+            co_return std::unexpected{exp.error()};
+        }
 
         core::Task<core::Expected<>> tmp{nullptr};
         while (task_queue_.pop(tmp)) {
