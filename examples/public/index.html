@@ -3,50 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NetX — High Performance Network Framework</title>
+<title>NetX HTTP</title>
 <style>
   :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: radial-gradient(1100px 700px at 15% 0%, #123a52 0%, #0b1520 45%, #05080d 100%);
-    color: #e6f1f7;
-    font-family: ui-monospace, "Cascadia Mono", Consolas, "JetBrains Mono", monospace;
-  }
-  .card {
-    text-align: center;
-    padding: 48px 64px;
-    border: 1px solid #1f4d66;
-    border-radius: 16px;
-    background: rgba(8, 20, 30, 0.6);
-    backdrop-filter: blur(4px);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
-  }
-  .logo {
-    font-size: 64px;
-    font-weight: 800;
-    letter-spacing: 10px;
-    background: linear-gradient(90deg, #38bdf8, #22d3ee);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-  h1 { font-size: 20px; font-weight: 600; color: #9fb9c9; margin: 8px 0 24px; }
-  .status { color: #4ade80; font-size: 14px; }
-  .accent { color: #38bdf8; }
-  .hint { margin-top: 28px; color: #5b7d92; font-size: 13px; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+         background: radial-gradient(900px 600px at 20% 0%, #123a52 0%, #0b1520 50%, #05080d 100%);
+         color: #e6f1f7; font-family: ui-monospace, Consolas, monospace; }
+  .card { width: min(560px, 92vw); padding: 28px 30px; border-radius: 14px;
+          border: 1px solid #1f4d66; background: rgba(8,20,30,.65);
+          box-shadow: 0 24px 80px rgba(0,0,0,.5); }
+  h1 { margin: 0 0 6px; font-size: 22px; color: #38bdf8; letter-spacing: 2px; }
+  p  { margin: 6px 0; color: #9fb8c8; font-size: 14px; line-height: 1.7; }
+  code { color: #7dd3fc; }
+  a { color: #4ade80; }
 </style>
 </head>
 <body>
   <div class="card">
-    <div class="logo">NETX</div>
-    <h1>High Performance Network Framework</h1>
-    <div class="status">● server running — served by the <span class="accent">netx_gui</span> TUI dashboard</div>
-    <div class="hint">select <b>public/index.html</b> in the Shared Resources tree, press <b>Start</b>, then reload.</div>
+    <h1>NETX HTTP</h1>
+    <p>这是一个静态文件，由 <code>with_file()</code> 通过 mmap 发出。</p>
+    <p>试试这几条路由：</p>
+    <p>
+      <a href="/hello/world">/hello/world</a> —— <code>:name</code> 路径参数<br>
+      <a href="/echo?q=netx&amp;n=42">/echo?q=netx&amp;n=42</a> —— 查询串<br>
+      <a href="/nope.txt">/nope.txt</a> —— 不存在的文件，走 404
+    </p>
+    <p>POST 也可以：<code>curl -d hello=world 127.0.0.1:8080/echo</code></p>
   </div>
 </body>
 </html>

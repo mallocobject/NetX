@@ -4,149 +4,151 @@
 #include "netx/core/task.hpp"
 #include "netx/net/stream.hpp"
 #include "netx/websocket/frame.hpp"
-namespace netx
-{
-namespace websocket
-{
-namespace details
-{
-struct Connection
-{
-	inline static constexpr size_t kMaxPayloadSize = 10 * 1024 * 1024; // 10MB
+#include <array>
+#include <cstring>
+#include <string_view>
 
-	core::Task<core::Expected<Frame>> receive();
+namespace netx {
+namespace websocket {
+namespace details {
 
-	core::Task<core::Expected<>> send_continuation(const std::string& data)
-	{
-		co_return co_await send_frame(Opcode::kContinuation, data);
-	}
-	core::Task<core::Expected<>> send_text(const std::string& data)
-	{
-		co_return co_await send_frame(Opcode::kText, data);
-	}
-	core::Task<core::Expected<>> send_binary(const std::string& data)
-	{
-		co_return co_await send_frame(Opcode::kBinary, data);
-	}
-	core::Task<core::Expected<>> send_close(const std::string& data)
-	{
-		co_return co_await send_frame(Opcode::kClose, data);
-	}
-	core::Task<core::Expected<>> send_ping(const std::string& data)
-	{
-		co_return co_await send_frame(Opcode::kPing, data);
-	}
-	core::Task<core::Expected<>> send_pong(const std::string& data)
-	{
-		co_return co_await send_frame(Opcode::kPong, data);
-	}
+/// 一条 WebSocket 连接。只做帧的收发，不做分片重组 —— 调用方拿到
+/// kContinuation 帧后自行拼接。
+struct Connection {
+    inline static constexpr size_t kMaxPayloadSize = 10 * 1024 * 1024;
 
-	explicit Connection(net::details::Stream& stream) : stream_(stream)
-	{
-	}
+    core::Task<core::Expected<Frame>> receive();
+
+    core::Task<core::Expected<>> send_continuation(const std::string &data) {
+        co_return co_await send_frame(Opcode::kContinuation, data);
+    }
+    core::Task<core::Expected<>> send_text(const std::string &data) {
+        co_return co_await send_frame(Opcode::kText, data);
+    }
+    core::Task<core::Expected<>> send_binary(const std::string &data) {
+        co_return co_await send_frame(Opcode::kBinary, data);
+    }
+    core::Task<core::Expected<>> send_close(const std::string &data) {
+        co_return co_await send_frame(Opcode::kClose, data);
+    }
+    core::Task<core::Expected<>> send_ping(const std::string &data) {
+        co_return co_await send_frame(Opcode::kPing, data);
+    }
+    core::Task<core::Expected<>> send_pong(const std::string &data) {
+        co_return co_await send_frame(Opcode::kPong, data);
+    }
+
+    explicit Connection(net::details::Stream &stream) : stream_(stream) {
+    }
 
   private:
-	core::Task<core::Expected<>> send_frame(Opcode opcode,
-											const std::string& payload,
-											bool fin = true);
+    core::Task<core::Expected<>>
+    send_frame(Opcode opcode, const std::string &payload, bool fin = true);
 
-	core::Task<core::Expected<>> ensure_read(size_t n)
-	{
-		while (stream_.read_buf.readable_bytes() < n)
-		{
-			co_await co_await stream_.read();
-		}
-		co_return {};
-	}
+    /// 攒够 n 字节再返回。只在需要时才真的读，所以一个帧最多读两次。
+    core::Task<core::Expected<>> ensure_read(size_t n) {
+        while (stream_.read_buf.readable_bytes() < n) {
+            co_await co_await stream_.read();
+        }
+        co_return {};
+    }
 
   private:
-	net::details::Stream& stream_;
+    net::details::Stream &stream_;
 };
 
-inline core::Task<core::Expected<Frame>> Connection::receive()
-{
-	auto& buf = stream_.read_buf;
+inline core::Task<core::Expected<Frame>> Connection::receive() {
+    auto &buf = stream_.read_buf;
 
-	co_await co_await ensure_read(2);
-	std::uint8_t b1 = buf.retrieve_integer<std::uint8_t>();
-	std::uint8_t b2 = buf.retrieve_integer<std::uint8_t>();
+    // 先取 2 字节固定头：长度字段的宽度和有没有掩码都由它决定
+    co_await co_await ensure_read(2);
+    const std::uint8_t b1 = static_cast<std::uint8_t>(buf.peek()[0]);
+    const std::uint8_t b2 = static_cast<std::uint8_t>(buf.peek()[1]);
+    buf.retrieve(2);
 
-	Frame frame{.fin = (b1 & 0x80) != 0,
-				.opcode = static_cast<Opcode>(b1 & 0x0f)};
+    const bool fin = (b1 & 0x80) != 0;
+    const auto raw_opcode = static_cast<std::uint8_t>(b1 & 0x0F);
 
-	bool has_mask = (b2 & 0x80) != 0;
-	std::uint64_t payload_len = b2 & 0x7f;
+    // RSV1-3 必须为 0（没协商任何扩展），opcode 也不能是保留值
+    if ((b1 & 0x70) != 0 || !is_known_opcode(raw_opcode)) {
+        co_return core::details::make_error_to_unexpected(
+            core::details::Error::InvalidOperation);
+    }
+    const auto opcode = static_cast<Opcode>(raw_opcode);
 
-	if (payload_len == 126)
-	{
-		co_await co_await ensure_read(2);
-		payload_len = buf.retrieve_integer<std::uint16_t>();
-	}
-	else if (payload_len == 127)
-	{
-		co_await co_await ensure_read(8);
-		payload_len = buf.retrieve_integer<std::uint64_t>();
-	}
+    const bool has_mask = (b2 & 0x80) != 0;
+    const std::uint8_t len7 = b2 & 0x7F;
 
-	if (payload_len > kMaxPayloadSize)
-	{
-		co_return core::details::make_error_code(
-			core::details::Error::InvalidOperation);
-	}
+    // 扩展长度字段：126 -> 2 字节，127 -> 8 字节，都是网络序
+    const size_t ext = (len7 == 126) ? 2 : (len7 == 127) ? 8 : 0;
+    std::uint64_t payload_len = len7;
+    if (ext > 0) {
+        co_await co_await ensure_read(ext);
+        payload_len = Frame::read_be(buf.peek(), ext);
+        buf.retrieve(ext);
+    }
 
-	std::uint8_t mask[4];
-	if (has_mask)
-	{
-		co_await co_await ensure_read(4);
-		std::memcpy(mask, buf.peek(), 4);
-		buf.retrieve(4);
-	}
+    if (payload_len > kMaxPayloadSize) {
+        co_return core::details::make_error_to_unexpected(
+            core::details::Error::InvalidOperation);
+    }
 
-	if (payload_len > 0)
-	{
-		co_await co_await ensure_read(payload_len);
-		frame.payload = buf.retrieve_string(payload_len);
+    // 控制帧不能分片，载荷也不能超过 125 字节
+    if (is_control(opcode) && (!fin || payload_len > 125)) {
+        co_return core::details::make_error_to_unexpected(
+            core::details::Error::InvalidOperation);
+    }
 
-		if (has_mask)
-		{
-			Frame::apply_mask(&frame.payload, mask);
-		}
-	}
+    const size_t mask_len = has_mask ? 4 : 0;
 
-	co_return frame;
+    // 掩码和载荷一次读齐：分几次读就是一个帧要读好几回
+    if (mask_len + payload_len > 0) {
+        co_await co_await ensure_read(mask_len + payload_len);
+    }
+
+    Frame frame{.fin = fin, .opcode = opcode, .payload = {}};
+
+    if (has_mask) {
+        std::uint8_t mask[4] = {};
+        std::memcpy(mask, buf.peek(), 4);
+        buf.retrieve(4);
+
+        if (payload_len > 0) {
+            frame.payload = buf.retrieve_string(payload_len);
+            Frame::apply_mask(&frame.payload, mask);
+        }
+    } else if (payload_len > 0) {
+        frame.payload = buf.retrieve_string(payload_len);
+    }
+
+    co_return frame;
 }
 
-inline core::Task<core::Expected<>> Connection::send_frame(
-	Opcode opcode, const std::string& payload, bool fin)
-{
-	std::string header;
-	header.push_back(static_cast<char>((fin ? 0x80 : 0x00) |
-									   static_cast<std::uint8_t>(opcode)));
+inline core::Task<core::Expected<>>
+Connection::send_frame(Opcode opcode, const std::string &payload, bool fin) {
+    if (is_control(opcode) && payload.size() > 125) {
+        co_return core::details::make_error_to_unexpected(
+            core::details::Error::InvalidOperation);
+    }
 
-	if (payload.size() <= 125)
-	{
-		header.push_back(static_cast<char>(payload.size()));
-	}
-	else if (payload.size() <= 65535)
-	{
-		header.push_back(126);
-		std::uint16_t len = htobe16(static_cast<std::uint16_t>(payload.size()));
-		header.append(reinterpret_cast<const char*>(&len), 2);
-	}
-	else
-	{
-		header.push_back(127);
-		std::uint64_t len = htobe64(payload.size());
-		header.append(reinterpret_cast<const char*>(&len), 8);
-	}
+    std::string header;
+    header.reserve(10);
+    header.push_back(static_cast<char>((fin ? 0x80 : 0x00) |
+                                       static_cast<std::uint8_t>(opcode)));
 
-	co_await co_await stream_.write(header);
-	if (!payload.empty())
-	{
-		co_await co_await stream_.write(payload);
-	}
+    if (payload.size() <= 125) {
+        header.push_back(static_cast<char>(payload.size()));
+    } else if (payload.size() <= 0xFFFF) {
+        header.push_back(126);
+        Frame::append_be(header, payload.size(), 2);
+    } else {
+        header.push_back(127);
+        Frame::append_be(header, payload.size(), 8);
+    }
 
-	co_return {};
+    // 头与载荷一次 writev 发出去：分成两次 write 就是两次系统调用
+    const std::array<std::string_view, 2> parts{header, payload};
+    co_return co_await stream_.write_many(parts);
 }
 } // namespace details
 } // namespace websocket

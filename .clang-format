@@ -1,10 +1,45 @@
-Language:  Cpp
-BasedOnStyle: MicroSoft
+# Cpp
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Indentation
 IndentWidth: 4
-UseTab: true
-BreakBeforeBraces: Allman
-AllowShortIfStatementsOnASingleLine: false
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
 ColumnLimit: 80
-SpacesBeforeTrailingComments: 1
-IndentCaseLabels: false
-PointerBindsToType: true
+
+# Braces: keep the opening brace on the same line as the declaration/statement
+BreakBeforeBraces: Attach
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: false
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterExternBlock: false
+  AfterFunction: false
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+# Templates: always put a line break after the template declaration
+AlwaysBreakTemplateDeclarations: true
+
+# Common readability settings
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+SortIncludes: CaseSensitive
+PointerAlignment: Right
+ReferenceAlignment: Pointer
+SpaceAfterTemplateKeyword: true

@@ -8,90 +8,77 @@
 #include "netx/websocket/connection.hpp"
 #include <concepts>
 #include <type_traits>
-namespace netx
-{
-namespace http
-{
-namespace details
-{
+namespace netx {
+namespace http {
+namespace details {
 using HttpHandler =
-	std::function<core::Task<core::Expected<Response>>(Request&)>;
+    std::function<core::Task<core::Expected<Response>>(Request &)>;
 using WsHandler = std::function<core::Task<core::Expected<>>(
-	websocket::details::Connection&)>;
+    websocket::details::Connection &)>;
 
-struct Router
-{
-	template <typename Handler>
-		requires std::invocable<Handler, Request&> &&
-				 std::same_as<std::invoke_result_t<Handler, Request&>,
-							  core::Task<core::Expected<Response>>>
-	void route(const std::string& method, const std::string& path,
-			   Handler&& handler)
-	{
-		trees_[method].insert(path, std::forward<Handler>(handler));
-	}
+struct Router {
+    template <typename Handler>
+        requires std::invocable<Handler, Request &> &&
+                 std::same_as<std::invoke_result_t<Handler, Request &>,
+                              core::Task<core::Expected<Response>>>
+    [[nodiscard]] bool route(const std::string &method,
+                             const std::string &path,
+                             Handler &&handler) {
+        return trees_[method].insert(path, std::forward<Handler>(handler));
+    }
 
-	template <typename Handler>
-		requires std::invocable<Handler, websocket::details::Connection&> &&
-				 std::same_as<std::invoke_result_t<
-								  Handler, websocket::details::Connection&>,
-							  core::Task<core::Expected<>>>
-	void route(const std::string& path, Handler&& handler)
-	{
-		route("GET", path,
-			  [](Request& req) -> core::Task<core::Expected<Response>>
-			  {
-				  Response res;
-				  if (req.header("upgrade") == "websocket")
-				  {
-					  res.with_status(101);
-				  }
-				  co_return res;
-			  });
+    template <typename Handler>
+        requires std::invocable<Handler, websocket::details::Connection &> &&
+                 std::same_as<
+                     std::invoke_result_t<Handler,
+                                          websocket::details::Connection &>,
+                     core::Task<core::Expected<>>>
+    [[nodiscard]] bool route(const std::string &path, Handler &&handler) {
+        // 升级请求先由 HTTP 侧接住：它要回 101 和握手头，真正的 WS 处理
+        // 在 http::Server 里等握手发完之后再接管
+        const bool ok =
+            route("GET",
+                  path,
+                  [](Request &req) -> core::Task<core::Expected<Response>> {
+                      Response res;
+                      if (req.header("upgrade") == "websocket") {
+                          res.with_status(101);
+                      }
+                      co_return res;
+                  });
 
-		ws_tree_.insert(path, std::move(handler));
-	}
+        return ok && ws_tree_.insert(path, std::move(handler));
+    }
 
-	WsHandler get_ws_handler(const std::string& path)
-	{
-		auto match = ws_tree_.search(path);
-		return match.value ? *match.value : nullptr;
-	}
+    WsHandler get_ws_handler(const std::string &path) {
+        auto match = ws_tree_.search(path);
+        return match.value ? *match.value : nullptr;
+    }
 
-	core::Task<core::Expected<Response>> dispatch(Request& req);
+    core::Task<core::Expected<Response>> dispatch(Request &req);
 
-	Router() = default;
-	Router(Router&&) = default;
-	~Router() = default;
-
-  private:
-	static std::string get_mine_type(const std::string& path);
+    Router() = default;
+    Router(Router &&) = default;
+    ~Router() = default;
 
   private:
-	std::unordered_map<std::string, RadixTree<HttpHandler>> trees_;
-	RadixTree<WsHandler> ws_tree_;
+    std::unordered_map<std::string, RadixTree<HttpHandler>> trees_;
+    RadixTree<WsHandler> ws_tree_;
 };
 
-inline core::Task<core::Expected<Response>> Router::dispatch(Request& req)
-{
-	std::string clean_path =
-		RadixTree<HttpHandler>::normalize_path(req.url_path);
-	req.url_path = clean_path;
+inline core::Task<core::Expected<Response>> Router::dispatch(Request &req) {
+    // 就地归一化。原实现先拷出一个新字符串、再在内部建容器拆段，
+    // 一次派发白白多做两三次分配。
+    RadixTree<HttpHandler>::normalize_in_place(req.url_path);
 
-	if (auto it = trees_.find(req.method); it != trees_.end())
-	{
-		HttpHandler handler;
+    if (auto it = trees_.find(req.method); it != trees_.end()) {
+        if (auto match = it->second.search(req.url_path); match.value) {
+            req.path_params = std::move(match.params);
+            co_return co_await (*match.value)(req);
+        }
+    }
 
-		if (auto match = it->second.search(clean_path);
-			match.value) // match.value 是指向 HttpHandler 的指针
-		{
-			req.path_params = std::move(match.params);
-
-			co_return co_await (*match.value)(req);
-		}
-	}
-
-	co_return Response{}.with_status(404).with_body("<h1>404 Not Found</h1>");
+    co_return Response{}.with_status(404).with_body("<h1>404 Not Found</h1>");
 }
 
 } // namespace details

@@ -1,23 +1,35 @@
-cmake_minimum_required(VERSION 3.22)
 project(test)
 
-# set(CMAKE_CXX_STANDARD 20)
-# set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Catch2 3 REQUIRED)
 
-add_executable(test1 http_server.cpp)
-# add_executable(test2 rpc_server_mt.cpp)
-# add_executable(test3 rpc_client.cpp)
+add_executable(netx_test
+    # hello.cpp
+    result.cpp
+    expected.cpp
+    event_loop.cpp
+    task.cpp
+    async_main.cpp
+    cancel.cpp
+    sleep.cpp
+    when_any.cpp
+    address.cpp
+    endian.cpp
+    socket.cpp
+    buffer.cpp
+    mpsc_queue.cpp
+    stream.cpp
+    scheduler.cpp
+    server.cpp
+    http.cpp
+    compile_all.cpp
+    websocket.cpp
+    sender.cpp)
 
-target_link_libraries(test1 PRIVATE netx elog)
-# target_link_libraries(test2 PRIVATE netx elog)
-# target_link_libraries(test3 PRIVATE netx elog)
+target_link_libraries(netx_test PRIVATE netx elog Catch2::Catch2WithMain)
 
-target_compile_definitions(test1 PRIVATE 
-    NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
-# target_compile_definitions(test2 PRIVATE 
-#     NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-# )
-# target_compile_definitions(test3 PRIVATE 
-#     NETX_WEB_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-# )
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(netx_test PRIVATE -Wall -Wextra)
+endif()
+
+include(Catch)
+catch_discover_tests(netx_test)

@@ -1,60 +1,54 @@
 #pragma once
 
+#include "netx/http/field_map.hpp"
 #include <string>
-#include <unordered_map>
-namespace netx
-{
-namespace http
-{
-struct Request
-{
+#include <string_view>
 
-	std::string header(const std::string& key) const
-	{
-		auto it = header_params.find(key);
-		return (it != header_params.end()) ? it->second : "";
-	}
+namespace netx {
+namespace http {
 
-	std::string query(const std::string& key) const
-	{
-		auto it = query_params.find(key);
-		return (it != query_params.end()) ? it->second : "";
-	}
+struct Request {
+    /// header 名由解析器统一转小写后存入，这里按原文查即可。
+    /// 返回 string_view：取值不该附带一次拷贝。
+    [[nodiscard]] std::string_view header(std::string_view key) const {
+        return header_params.get(key);
+    }
 
-	std::string path(const std::string& key) const
-	{
-		auto it = path_params.find(key);
-		return (it != path_params.end()) ? it->second : "";
-	}
+    [[nodiscard]] std::string_view query(std::string_view key) const {
+        return query_params.get(key);
+    }
 
-	void clear()
-	{
-		method.clear();
-		url_path.clear();
-		version.clear();
-		header_params.clear();
-		query_params.clear();
-		path_params.clear();
-		body.clear();
-		keep_alive = false;
-		ctx_len = 0;
-	}
+    [[nodiscard]] std::string_view path(std::string_view key) const {
+        return path_params.get(key);
+    }
 
-	Request() = default;
-	Request(Request&&) = default;
-	~Request() = default;
+    void clear() {
+        method.clear();
+        url_path.clear();
+        version.clear();
+        header_params.clear();
+        query_params.clear();
+        path_params.clear();
+        body.clear();
+        keep_alive = false;
+        ctx_len = 0;
+    }
 
-	std::string method;
-	std::string url_path;
-	std::string version;
+    Request() = default;
+    Request(Request &&) = default;
+    ~Request() = default;
 
-	std::unordered_map<std::string, std::string> header_params;
-	std::unordered_map<std::string, std::string> query_params;
-	std::unordered_map<std::string, std::string> path_params;
+    std::string method;
+    std::string url_path;
+    std::string version;
 
-	std::string body;
-	bool keep_alive{false};
-	size_t ctx_len{0};
+    FieldMap header_params;
+    FieldMap query_params;
+    FieldMap path_params;
+
+    std::string body;
+    bool keep_alive{false};
+    size_t ctx_len{0};
 };
 } // namespace http
 } // namespace netx

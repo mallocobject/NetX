@@ -1,51 +1,99 @@
 #pragma once
 
+#include <chrono>
 #include <compare>
 #include <cstdint>
-namespace netx
-{
-namespace core
-{
-namespace details
-{
+#include <list>
+#include <set>
+#include <utility>
+
+namespace netx::core::details {
 using HandleId = std::uint64_t;
-struct Handle
-{
-	Handle() : id(++handle_id_genaration_)
-	{
-	}
 
-	virtual void run() = 0;
-	virtual ~Handle() = default;
+class Handle;
 
-	enum class State : std::uint8_t
-	{
-		kUnscheduled,
-		kSuspend,
-		kScheduled,
-		kCancelled,
-	} state{Handle::State::kUnscheduled};
+/// 等待 fd 事件的对象。定义在 event_loop.hpp 的命名空间作用域里 —— 正是为了
+/// 让这里能前置声明：挂起记录的槽要直接存它的指针。
+class EventAwaiter;
 
-	const HandleId id{0};
+/// 调度用的时钟。定时器集合按时刻排序，必须和 EventLoop 用同一个。
+using ScheduleClock = std::chrono::steady_clock;
 
+class HandleInfo {
+  public:
+    Handle *handle{nullptr};
+    HandleId id{0};
+
+  public:
+    /// 定义在 Handle 之后：比较指针要求类型完整。
+    std::strong_ordering operator<=>(const HandleInfo &other) const noexcept;
+};
+
+/// 定时器集合的元素：到期时刻 + 该 handle 的标识。
+using TimerEntry = std::pair<ScheduleClock::time_point, HandleInfo>;
+
+class Handle {
   private:
-	inline static thread_local HandleId handle_id_genaration_{0};
+    inline static thread_local HandleId handle_id_generation_{0};
+
+  public:
+    /// 挂起记录的形态。一个 handle 在任一时刻只处于其中一种，所以下面用
+    /// 联合体存具体的引用。
+    ///
+    /// 内联在 Handle 里而不是集中到 EventLoop 的表里：挂起/恢复是热路径，
+    /// 而绝大多数调用点手里本来就有 Handle&，没必要绕一次查找。
+    enum class SlotKind : std::uint8_t { kNone, kReady, kTimer, kEvent };
+
+    /// 只在 slot_kind 指明的那一个成员有效。
+    ///   kReady —— 在就绪队列里的位置，供 O(1) 摘除
+    ///   kTimer —— 在定时器集合里的位置
+    ///   kEvent —— 撤销 epoll 注册的入口
+    union SlotRef {
+        std::list<HandleInfo>::iterator ready;
+        std::set<TimerEntry>::iterator timer;
+        EventAwaiter *awaiter;
+    };
+
+    const HandleId id{0};
+
+    /// 是否已被要求停止，置位后不会自动清除（sticky）。取消信号主要通过
+    /// co_await 的结果（Error::Cancelled）传递给任务。
+    bool cancelled{false};
+
+    /// 我正在等待的对象。父协程 co_await 一个子任务时，这里指向子任务的
+    /// promise。
+    ///
+    /// 父协程处于这种等待时**没有挂起记录** —— 记录属于被等待的那一方 ——
+    /// 所以只有这条边能把等待关系串起来，让 EventLoop::cancel() 沿它向下把
+    /// 整条链取消掉。
+    Handle *waiting_on{nullptr};
+
+    SlotKind slot_kind{SlotKind::kNone};
+    SlotRef slot{};
+
+  public:
+    Handle() : id(++handle_id_generation_) {
+    }
+
+    virtual ~Handle() = default;
+
+    virtual void run() = 0;
+
+    /// 被取消时的收尾钩子，由 EventLoop::cancel() 调用。
+    ///
+    /// 默认什么都不做：普通 Handle（比如 WrappedTask 的摘节点句柄）被取消
+    /// 后只是不再执行，没有"结果"要交代。协程 promise 会覆盖它 —— 给尚未
+    /// 定局的任务定一个取消结果并唤醒等待者，少了后半句，等它的一方就会
+    /// 永久挂起。
+    virtual void on_cancel() noexcept {
+    }
 };
 
-struct HandleInfo
-{
-	std::strong_ordering operator<=>(const HandleInfo& other) const noexcept
-	{
-		if (auto cmp = id <=> other.id; cmp != 0)
-		{
-			return cmp;
-		}
-		return handle <=> other.handle;
-	}
-
-	HandleId id{0};
-	Handle* handle{nullptr};
-};
-} // namespace details
-} // namespace core
-} // namespace netx
+inline std::strong_ordering
+HandleInfo::operator<=>(const HandleInfo &other) const noexcept {
+    if (auto cmp = id <=> other.id; cmp != 0) {
+        return cmp;
+    }
+    return handle <=> other.handle;
+}
+} // namespace netx::core::details
