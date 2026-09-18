@@ -185,6 +185,11 @@ class EventLoop {
             return;
         }
 
+        // 没有单条等待边：让钩子把它等的那一批也取消掉
+        if (auto *hook = std::exchange(handle.cancel_hook, nullptr)) {
+            hook->cancel_downstream();
+        }
+
         handle.on_cancel();
     }
 

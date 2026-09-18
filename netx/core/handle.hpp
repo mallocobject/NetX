@@ -34,6 +34,12 @@ struct HandleInfo {
 /// 定时器集合的元素：到期时刻 + 该 handle 的标识。
 using TimerEntry = std::pair<ScheduleClock::time_point, HandleInfo>;
 
+/// 一对多的等待关系（when_any）没法用单条 waiting_on 表达，
+/// 挂个钩子：cancel() 沿 waiting_on 走不到的下游，由它兜底。
+struct CancelHook {
+    virtual void cancel_downstream() noexcept = 0;
+};
+
 class Handle {
   public:
     /// 挂起记录的形态。一个 handle 在任一时刻只处于其中一种，所以下面用
@@ -63,6 +69,7 @@ class Handle {
 
     // 父协程 co_await 一个子任务时，这里指向子任务的 promise。
     Handle *waiting_on{nullptr};
+    CancelHook *cancel_hook{nullptr};
 
     SlotKind slot_kind{SlotKind::kNone};
     SlotRef slot{};

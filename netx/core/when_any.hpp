@@ -17,7 +17,7 @@
 
 namespace netx::core {
 namespace details {
-struct WhenAnyCtlBlock {
+struct WhenAnyCtlBlock : public CancelHook {
     static constexpr size_t npos{static_cast<size_t>(-1)};
 
     bool try_complete(size_t index, std::exception_ptr ep) {
@@ -46,6 +46,15 @@ struct WhenAnyCtlBlock {
             w->wake(); // 强入队：等待者可能刚被取消过
         }
         return true;
+    }
+
+    void cancel_downstream() noexcept override {
+        for (auto &t : tasks) {
+            if (t.valid() && !t.done()) {
+                t.coro.promise().request_cancel();
+            }
+        }
+        winner = npos; // 别让它之后再去唤醒一个已经取消的等待者
     }
 
     size_t winner{npos};
@@ -115,7 +124,10 @@ struct WhenAnyAwaiter {
         }
 
         // 登记"谁在等"：赢家收尾时顺着它把本协程叫醒。
-        ctl.waiter = &coro.promise();
+        auto &promise = coro.promise();
+        ctl.waiter = &promise;
+        promise.cancel_hook = &ctl;
+
         return true;
     }
 
@@ -171,10 +183,3 @@ auto when_any(Ts... ts) {
                                   std::move(ts)...);
 }
 } // namespace netx::core
-
-// 两个已知缺口（都要"一个节点多条等待边"才能彻底解决 —— Handle::waiting_on
-// 是单指针）：
-//   1. 取消 when_any 返回的任务，不会连带取消它的 helper：等待关系登记在
-//      自定义 awaiter 上（ctl.waiter），不走 AwaiterBase，没有 waiting_on 边；
-//   2. 所以 helper 会继续跑到结束，只是结果被丢掉 —— 它们的帧归 when_any 的
-//      帧所有，一起销毁，不泄漏也不复活（唤醒前会检查 cancelled）。

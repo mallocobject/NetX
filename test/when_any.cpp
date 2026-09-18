@@ -184,7 +184,95 @@ TEST_CASE("取消 when_any 本身：晚到的赢家不会把它复活", "[when_a
     REQUIRE_FALSE(task.coro.promise().result().has_value());
     CHECK(task.coro.promise().result().error() == Error::Cancelled);
 
-    // 已知缺口：helper 不会跟着取消，所以赢家还是会跑完（结果被丢掉）。
-    // 它们的帧归 when_any 的帧所有，不泄漏。
-    CHECK(logged(log, "a:完成"));
+}
+
+TEST_CASE("取消 when_any 本身时，它的输入也该被取消",
+          "[when_any]") {
+    auto &loop = EventLoop::loop();
+    std::vector<std::string> log;
+
+    auto task = when_any(tagged(200ms, "a", log), tagged(200ms, "b", log));
+    Killer killer{task.coro.promise()};
+    task.coro.promise().schedule();
+    loop.call_after(5ms, killer); // 两个输入都还没到点
+    async_main();
+
+    // 正确行为：两个输入都收到取消，谁都不该"完成"
+    CHECK_FALSE(logged(log, "a:完成"));
+    CHECK_FALSE(logged(log, "b:完成"));
+    CHECK(logged(log, "a:取消"));
+    CHECK(logged(log, "b:取消"));
+}
+
+TEST_CASE("取消 when_any 本身后，循环应当立刻空掉", "[when_any]") {
+    auto &loop = EventLoop::loop();
+    std::vector<std::string> log;
+
+    auto task = when_any(tagged(300ms, "a", log), tagged(300ms, "b", log));
+    Killer killer{task.coro.promise()};
+    task.coro.promise().schedule();
+    loop.call_after(5ms, killer);
+
+    // 取消发生在 5ms 处。取消若真的传到了输入上，循环应当在那之后立刻空掉；
+    // 现在它们的定时器还挂在 scheduled_ 里，所以要一直等到 300ms 自然到期。
+    const auto start = steady_clock::now();
+    async_main();
+    const auto elapsed = steady_clock::now() - start;
+
+    // 被取消的输入会记"取消"，这是对的；不该出现的是"完成"
+    CHECK_FALSE(logged(log, "a:完成"));
+    CHECK_FALSE(logged(log, "b:完成"));
+    CHECK(logged(log, "a:取消"));
+    CHECK(logged(log, "b:取消"));
+    CHECK(elapsed < 100ms);      // 取消传下去了，就不该等满那 300ms
+}
+
+TEST_CASE("三个输入时，赢家之外的两个都被取消", "[when_any]") {
+    auto &loop = EventLoop::loop();
+    std::vector<std::string> log;
+
+    const auto r = async_main(when_any(tagged(1ms, "fast", log),
+                                       tagged(500ms, "slow1", log),
+                                       tagged(500ms, "slow2", log)));
+
+    REQUIRE(r.has_value());
+    CHECK(r->index() == 0);
+    CHECK(logged(log, "fast:完成"));
+    // 两个输家都要被取消，不是只取消第一个
+    CHECK(logged(log, "slow1:取消"));
+    CHECK(logged(log, "slow2:取消"));
+    CHECK_FALSE(logged(log, "slow1:完成"));
+    CHECK_FALSE(logged(log, "slow2:完成"));
+    CHECK(loop.stopped());
+}
+
+TEST_CASE("空任务混在有效输入里：不算赢家，也不拦住竞速", "[when_any]") {
+    auto &loop = EventLoop::loop();
+    std::vector<std::string> log;
+
+    // 第一个是空壳（valid() 为假）。它既没有等待边，也不该被当成赢家。
+    const auto r = async_main(
+        when_any(Task<Expected<std::string>>{nullptr}, tagged(1ms, "real", log)));
+
+    REQUIRE(r.has_value());
+    CHECK(r->index() == 1); // 赢家是那个真的会跑完的
+    CHECK(logged(log, "real:完成"));
+    CHECK(loop.stopped());
+}
+
+TEST_CASE("赢家已经定局之后再取消，不会改变已经拿到手的索引", "[when_any]") {
+    auto &loop = EventLoop::loop();
+    std::vector<std::string> log;
+
+    auto task = when_any(tagged(1ms, "fast", log), tagged(500ms, "slow", log));
+    Killer killer{task.coro.promise()};
+
+    task.coro.promise().schedule();
+    loop.call_after(200ms, killer); // 等赢家定局之后再取消
+    async_main();
+
+    // 结果已经落地，取消不该把它掀翻
+    CHECK(task.settled());
+    REQUIRE(task.coro.promise().result().has_value());
+    CHECK(task.coro.promise().result()->index() == 0); // 还是赢家的槽位
 }
